@@ -1,0 +1,97 @@
+from pathlib import Path
+from typing import Literal
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+LLMProvider = Literal["openai", "groq", "claude"]
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-4-20250514"
+    default_llm_provider: LLMProvider = "openai"
+    prompts_file: str = "prompts/default_prompts.json"
+    upload_dir: str = "uploads"
+    output_dir: str = "outputs"
+    stored_cv_dir: str = "stored_cv"
+    cors_origins: str = "http://localhost:3000"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def base_dir(self) -> Path:
+        return Path(__file__).resolve().parent.parent
+
+    @property
+    def prompts_path(self) -> Path:
+        path = Path(self.prompts_file)
+        if not path.is_absolute():
+            path = self.base_dir / path
+        return path
+
+    @property
+    def upload_path(self) -> Path:
+        path = self.base_dir / self.upload_dir
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @property
+    def output_path(self) -> Path:
+        path = self.base_dir / self.output_dir
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @staticmethod
+    def _is_valid_api_key(key: str) -> bool:
+        cleaned = key.strip()
+        if len(cleaned) < 20:
+            return False
+
+        placeholder_markers = (
+            "your-key",
+            "your-openai",
+            "your-claude",
+            "your-groq",
+            "sk-your",
+            "gsk-your",
+            "sk-ant-your",
+            "changeme",
+            "example",
+            "placeholder",
+        )
+        lowered = cleaned.lower()
+        return not any(marker in lowered for marker in placeholder_markers)
+
+    def is_provider_configured(self, provider: str) -> bool:
+        keys = {
+            "openai": self.openai_api_key,
+            "groq": self.groq_api_key,
+            "claude": self.anthropic_api_key,
+        }
+        key = keys.get(provider, "")
+        return self._is_valid_api_key(key)
+
+    def first_configured_provider(self) -> LLMProvider | None:
+        for provider in ("openai", "groq", "claude"):
+            if self.is_provider_configured(provider):
+                return provider
+        return None
+
+    def default_model_for(self, provider: LLMProvider) -> str:
+        models = {
+            "openai": self.openai_model,
+            "groq": self.groq_model,
+            "claude": self.anthropic_model,
+        }
+        return models[provider]
+
+
+settings = Settings()
