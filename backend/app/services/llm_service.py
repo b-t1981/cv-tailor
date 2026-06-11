@@ -205,6 +205,58 @@ class LLMService:
             )
         )
 
+    @staticmethod
+    def _extract_retry_seconds(text: str) -> int | None:
+        match = re.search(r"try again in (\d+)m(\d+(?:\.\d+)?)?s", text, re.I)
+        if match:
+            return int(match.group(1)) * 60 + int(float(match.group(2) or 0))
+        match = re.search(r"try again in (\d+(?:\.\d+)?)\s*s(?:ec)?", text, re.I)
+        if match:
+            return max(1, int(float(match.group(1))))
+        return None
+
+    @staticmethod
+    def _format_wait_hint(seconds: int) -> str:
+        if seconds < 60:
+            return "quelques instants"
+        minutes = max(1, round(seconds / 60))
+        if minutes == 1:
+            return "environ 1 minute"
+        return f"environ {minutes} minutes"
+
+    @classmethod
+    def _format_provider_error(cls, exc: Exception, provider: str) -> str:
+        label = PROVIDER_LABELS.get(provider, provider)
+        status = getattr(exc, "status_code", None)
+        msg = str(exc).lower()
+
+        if cls._is_api_key_error(exc):
+            return f"Clé API {label} invalide. Contactez l'administrateur du service."
+
+        if status == 429 or "rate_limit" in msg or "rate limit" in msg:
+            wait = cls._extract_retry_seconds(str(exc))
+            if wait:
+                return (
+                    f"Quota {label} atteint pour aujourd'hui. "
+                    f"Réessayez dans {cls._format_wait_hint(wait)}."
+                )
+            return (
+                f"Quota {label} atteint. "
+                "Réessayez dans quelques minutes ou plus tard dans la journée."
+            )
+
+        if status == 503 or "overloaded" in msg or "capacity" in msg:
+            return f"Le service {label} est temporairement surchargé. Réessayez dans un instant."
+
+        if status in (502, 504) or "timeout" in msg:
+            return f"Le service {label} ne répond pas. Réessayez dans quelques minutes."
+
+        return f"Le service {label} est momentanément indisponible. Réessayez dans quelques minutes."
+
+    @classmethod
+    def _raise_provider_error(cls, exc: Exception, provider: str) -> None:
+        raise ValueError(cls._format_provider_error(exc, provider)) from exc
+
     def list_providers(self) -> LLMProvidersResponse:
         providers = [
             LLMProviderInfo(
@@ -266,12 +318,7 @@ class LLMService:
                     temperature=temperature,
                 )
         except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
-            if self._is_api_key_error(exc):
-                raise ValueError(
-                    f"{PROVIDER_LABELS[selected_provider]} API key is invalid. "
-                    f"Check {selected_provider.upper()}_API_KEY in backend/.env"
-                ) from exc
-            raise ValueError(f"{PROVIDER_LABELS[selected_provider]} request failed: {exc}") from exc
+            self._raise_provider_error(exc, selected_provider)
 
         return self._parse_response(content)
 
@@ -321,12 +368,7 @@ class LLMService:
                     model=selected_model,
                 )
         except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
-            if self._is_api_key_error(exc):
-                raise ValueError(
-                    f"{PROVIDER_LABELS[selected_provider]} API key is invalid. "
-                    f"Check {selected_provider.upper()}_API_KEY in backend/.env"
-                ) from exc
-            raise ValueError(f"{PROVIDER_LABELS[selected_provider]} request failed: {exc}") from exc
+            self._raise_provider_error(exc, selected_provider)
 
         return self._parse_match_response(content)
 
@@ -392,12 +434,7 @@ class LLMService:
                     model=selected_model,
                 )
         except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
-            if self._is_api_key_error(exc):
-                raise ValueError(
-                    f"{PROVIDER_LABELS[selected_provider]} API key is invalid. "
-                    f"Check {selected_provider.upper()}_API_KEY in backend/.env"
-                ) from exc
-            raise ValueError(f"{PROVIDER_LABELS[selected_provider]} request failed: {exc}") from exc
+            self._raise_provider_error(exc, selected_provider)
 
         result = self._parse_analysis_response(content)
         result = self._sanitize_analysis_keywords(job_description, cv_paragraphs, result)
@@ -469,12 +506,7 @@ class LLMService:
                     temperature=0.4,
                 )
         except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
-            if self._is_api_key_error(exc):
-                raise ValueError(
-                    f"{PROVIDER_LABELS[selected_provider]} API key is invalid. "
-                    f"Check {selected_provider.upper()}_API_KEY in backend/.env"
-                ) from exc
-            raise ValueError(f"{PROVIDER_LABELS[selected_provider]} request failed: {exc}") from exc
+            self._raise_provider_error(exc, selected_provider)
 
         return self._parse_application_kit(content)
 
@@ -830,12 +862,7 @@ class LLMService:
                     temperature=0.1,
                 )
         except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
-            if self._is_api_key_error(exc):
-                raise ValueError(
-                    f"{PROVIDER_LABELS[selected_provider]} API key is invalid. "
-                    f"Check {selected_provider.upper()}_API_KEY in backend/.env"
-                ) from exc
-            raise ValueError(f"{PROVIDER_LABELS[selected_provider]} request failed: {exc}") from exc
+            self._raise_provider_error(exc, selected_provider)
 
         return self._parse_translate_response(content, target_language)
 
