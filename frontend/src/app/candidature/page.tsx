@@ -6,7 +6,7 @@ import { BackendConnectionBanner } from "@/components/BackendConnectionBanner";
 import { CopyButton } from "@/components/CopyButton";
 import { LLMSelector, type LLMProviderId } from "@/components/LLMSelector";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
-import { loadAdaptedCv } from "@/lib/history";
+import { loadCvForApplication } from "@/lib/history";
 import { useI18n } from "@/i18n/context";
 import {
   exportCoverLetterDocx,
@@ -38,17 +38,36 @@ export default function ApplicationPage() {
   const [usingAdaptedCv, setUsingAdaptedCv] = useState(false);
   const [coverLetterPdfUrl, setCoverLetterPdfUrl] = useState<string | null>(null);
 
+  const refreshCvFromStorage = useCallback(() => {
+    const cv = loadCvForApplication();
+    if (cv) {
+      setCvParagraphs(cv.paragraphs);
+      setCvFilename(cv.filename);
+      setUsingAdaptedCv(cv.adapted);
+    } else {
+      setCvParagraphs([]);
+      setCvFilename("");
+      setUsingAdaptedCv(false);
+    }
+  }, []);
+
   useEffect(() => {
     const saved = sessionStorage.getItem(JOB_STORAGE_KEY);
     if (saved) setJobDescription(saved);
+    refreshCvFromStorage();
+  }, [refreshCvFromStorage]);
 
-    const adapted = loadAdaptedCv();
-    if (adapted) {
-      setCvParagraphs(adapted.paragraphs);
-      setCvFilename(adapted.filename);
-      setUsingAdaptedCv(true);
-    }
-  }, []);
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshCvFromStorage();
+    };
+    window.addEventListener("focus", refreshCvFromStorage);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", refreshCvFromStorage);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refreshCvFromStorage]);
 
   useEffect(() => {
     if (jobDescription.trim()) {

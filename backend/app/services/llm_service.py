@@ -31,10 +31,12 @@ PROVIDER_LABELS = {
     "claude": "Claude (Anthropic)",
 }
 
+# Ordre = priorité (le plus spécifique en premier). Pas de "mission" seul (matche "Our Purpose and Mission").
 _CORE_JOB_MARKERS = (
     "specification of core function",
     "core function",
     "key responsibilities",
+    "principal responsibilities",
     "responsibilities",
     "requirements",
     "qualifications",
@@ -42,7 +44,7 @@ _CORE_JOB_MARKERS = (
     "profil recherche",
     "vos missions",
     "mission du poste",
-    "mission",
+    "votre mission",
 )
 
 _NOISE_KEYWORDS = frozenset({
@@ -359,8 +361,9 @@ class LLMService:
             "- NEVER put a keyword in missing_keywords if it appears anywhere in the CV text\n"
             "- NEVER put a keyword in missing_keywords if it does NOT appear in core role requirements\n"
             "- NEVER list CV-only skills/tools in missing_keywords\n"
-            "- keyword_suggestions: actionable tips to address missing keywords HONESTLY "
-            "(e.g. mention a related project if in CV, or develop the skill — max 4)\n"
+            "- NEVER invent tools (Jira, ServiceNow, Pentaho, Automic…) unless they appear "
+            "verbatim in core role requirements\n"
+            "- keyword_suggestions: only for validated missing_keywords (max 4)\n"
             "- gaps: 2-4 concrete job requirements from the core function NOT evidenced in the CV\n"
             "- Only list concrete skills, tools, technologies, certifications, or domain terms\n"
             "- Do NOT invent CV content\n\n"
@@ -564,13 +567,10 @@ class LLMService:
     @staticmethod
     def _extract_core_job_text(job_description: str) -> str:
         lower = job_description.lower()
-        start = -1
         for marker in _CORE_JOB_MARKERS:
             idx = lower.find(marker)
-            if idx >= 0 and (start < 0 or idx < start):
-                start = idx
-        if start >= 0:
-            return job_description[start:].strip()
+            if idx >= 0:
+                return job_description[idx:].strip()
         if len(job_description) > 1800:
             return job_description[-1800:].strip()
         return job_description.strip()
@@ -676,19 +676,24 @@ class LLMService:
             key = keyword.strip().lower()
             if not key or key in seen or cls._is_noise_keyword(keyword):
                 continue
+
+            if cls._cv_covers_keyword(keyword, cv_paragraphs):
+                if (
+                    not cls._is_noise_keyword(keyword)
+                    and cls._term_in_text(keyword, core_job)
+                    and key not in seen
+                ):
+                    present.append(keyword)
+                    seen.add(key)
+                elif key not in seen:
+                    seen.add(key)
+                continue
+
             if not cls._term_in_text(keyword, core_job):
                 continue
 
             concept = cls._keyword_concept(keyword)
             if concept and concept in missing_concepts:
-                continue
-
-            if cls._cv_covers_keyword(keyword, cv_paragraphs):
-                if not cls._is_noise_keyword(keyword) and cls._term_in_text(keyword, job_description):
-                    present.append(keyword)
-                seen.add(key)
-                if concept:
-                    missing_concepts.add(concept)
                 continue
 
             missing.append(keyword)
@@ -698,7 +703,44 @@ class LLMService:
 
         result["present_keywords"] = present[:10]
         result["missing_keywords"] = missing[:6]
+        result["keyword_suggestions"] = cls._sanitize_keyword_suggestions(
+            result.get("keyword_suggestions", []),
+            result["missing_keywords"],
+            cv_paragraphs,
+            core_job,
+        )
         return result
+
+    @classmethod
+    def _sanitize_keyword_suggestions(
+        cls,
+        suggestions: list[str],
+        missing_keywords: list[str],
+        cv_paragraphs: str,
+        core_job: str,
+    ) -> list[str]:
+        if not missing_keywords:
+            return []
+        filtered: list[str] = []
+        for suggestion in suggestions:
+            text = suggestion.strip()
+            if not text:
+                continue
+            normalized = cls._normalize_for_match(text)
+            refers_to_missing = any(
+                cls._normalize_for_match(keyword) in normalized
+                for keyword in missing_keywords
+            )
+            if not refers_to_missing:
+                continue
+            if any(
+                cls._cv_covers_keyword(keyword, cv_paragraphs)
+                for keyword in missing_keywords
+                if cls._normalize_for_match(keyword) in normalized
+            ):
+                continue
+            filtered.append(text)
+        return filtered[:4]
 
     @staticmethod
     def _parse_analysis_response(content: str) -> dict:

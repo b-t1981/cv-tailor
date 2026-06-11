@@ -25,7 +25,7 @@ import {
   type TailorIntensity,
   type TailorResult,
 } from "@/lib/api";
-import { saveAdaptedCv, saveHistoryEntry } from "@/lib/history";
+import { saveAdaptedCv, saveHistoryEntry, savePreviewCv } from "@/lib/history";
 
 const JOB_STORAGE_KEY = "cv-tailor-job-description";
 
@@ -108,8 +108,10 @@ export default function HomePage() {
     setLanguageTouched(true);
     setTranslationError(null);
     translationCacheRef.current = {};
-    setPreviewFilename(filename ?? preview.filename);
+    const fname = filename ?? preview.filename;
+    setPreviewFilename(fname);
     if (preview.paragraphs.length > 0) {
+      savePreviewCv(preview.paragraphs, fname || "cv.docx");
       setTimeout(() => {
         document.getElementById("cv-compare-section")?.scrollIntoView({ behavior: "smooth" });
       }, 200);
@@ -236,6 +238,14 @@ export default function HomePage() {
       return paragraph;
     });
   }, [result, acceptedModifications]);
+
+  useEffect(() => {
+    if (!displayTailoredParagraphs?.length) return;
+    saveAdaptedCv(
+      displayTailoredParagraphs,
+      previewFilename || file?.name || "cv.docx",
+    );
+  }, [displayTailoredParagraphs, previewFilename, file]);
 
   const handleExportReady = useCallback(
     async (urls: { downloadUrl: string; downloadUrlPdf?: string | null }) => {
