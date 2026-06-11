@@ -6,6 +6,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LLMProvider = Literal["openai", "groq", "claude"]
 
+_DEEPL_FREE_URL = "https://api-free.deepl.com/v2/translate"
+_DEEPL_PRO_URL = "https://api.deepl.com/v2/translate"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
@@ -32,6 +35,12 @@ class Settings(BaseSettings):
     cookie_samesite: str = "lax"
     allow_prompt_writes: bool = False
     admin_api_token: str = ""
+    deepl_api_key: str = ""
+    deepl_use_free_api: bool = True
+
+    @property
+    def deepl_api_url(self) -> str:
+        return _DEEPL_FREE_URL if self.deepl_use_free_api else _DEEPL_PRO_URL
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -96,6 +105,13 @@ class Settings(BaseSettings):
         )
         lowered = cleaned.lower()
         return not any(marker in lowered for marker in placeholder_markers)
+
+    def is_deepl_configured(self) -> bool:
+        key = self.deepl_api_key.strip()
+        if len(key) < 20:
+            return False
+        lowered = key.lower()
+        return not any(marker in lowered for marker in ("your-deepl", "changeme", "example", "placeholder"))
 
     def is_provider_configured(self, provider: str) -> bool:
         keys = {

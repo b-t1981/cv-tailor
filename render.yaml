@@ -12,6 +12,10 @@ services:
     envVars:
       - key: GROQ_API_KEY
         sync: false
+      - key: DEEPL_API_KEY
+        sync: false
+      - key: DEEPL_USE_FREE_API
+        value: "true"
       - key: DEFAULT_LLM_PROVIDER
         value: groq
       - key: GROQ_MODEL

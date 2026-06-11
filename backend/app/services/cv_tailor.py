@@ -13,6 +13,7 @@ from app.services.docx_processor import (
     paragraphs_to_prompt_text,
     save_docx,
 )
+from app.services.deepl_service import deepl_service
 from app.services.llm_service import llm_service
 from app.services.modification_sanitizer import sanitize_modifications
 from app.services.pdf_exporter import export_docx_to_pdf
@@ -33,6 +34,56 @@ class CVTailorService:
         return {
             "filename": original_filename,
             "paragraphs": paragraphs,
+        }
+
+    def translate_paragraphs(
+        self,
+        paragraphs: list[ParagraphInfo],
+        target_language: str,
+        llm_provider: str,
+        llm_model: str | None,
+    ) -> dict:
+        if deepl_service.is_configured():
+            return deepl_service.translate_paragraphs(paragraphs, target_language)
+
+        cv_text = paragraphs_to_prompt_text(paragraphs)
+        result = llm_service.translate_cv(
+            cv_paragraphs=cv_text,
+            target_language=target_language,
+            provider=llm_provider,  # type: ignore[arg-type]
+            model=llm_model,
+        )
+
+        if not result["translated"]:
+            return {
+                "paragraphs": paragraphs,
+                "source_language": result["source_language"],
+                "target_language": target_language,
+                "translated": False,
+            }
+
+        translations = result["translations"]
+        updated: list[ParagraphInfo] = []
+        for paragraph in paragraphs:
+            new_text = translations.get(paragraph.id)
+            if new_text:
+                updated.append(
+                    ParagraphInfo(
+                        id=paragraph.id,
+                        text=new_text,
+                        style=paragraph.style,
+                        is_heading=paragraph.is_heading,
+                        modified=True,
+                    )
+                )
+            else:
+                updated.append(paragraph)
+
+        return {
+            "paragraphs": updated,
+            "source_language": result["source_language"],
+            "target_language": target_language,
+            "translated": True,
         }
 
     def _run_tailor_llm(

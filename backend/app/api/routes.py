@@ -26,6 +26,8 @@ from app.models.schemas import (
     RetryModificationsResponse,
     TailorRequest,
     TailorResponse,
+    TranslateCVRequest,
+    TranslateCVResponse,
 )
 from app.services.application_service import application_service
 from app.services.cover_letter_exporter import export_cover_letter_docx, export_cover_letter_pdf
@@ -270,6 +272,27 @@ async def compute_match(request: Request, payload: MatchScoreRequest) -> MatchSc
                 llm_model=payload.llm_model,
             )
         return MatchScoreResponse(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        status_code = 400 if "API key" in message else 500
+        raise HTTPException(status_code=status_code, detail=message) from exc
+
+
+@router.post("/translate", response_model=TranslateCVResponse)
+async def translate_cv(request: Request, payload: TranslateCVRequest) -> TranslateCVResponse:
+    if not settings.is_provider_configured(payload.llm_provider):
+        raise HTTPException(status_code=400, detail=f"API key for '{payload.llm_provider}' is not configured")
+
+    try:
+        result = cv_tailor_service.translate_paragraphs(
+            paragraphs=payload.paragraphs,
+            target_language=payload.target_language,
+            llm_provider=payload.llm_provider,
+            llm_model=payload.llm_model,
+        )
+        return TranslateCVResponse(**result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

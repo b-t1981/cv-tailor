@@ -224,6 +224,37 @@ export async function generateApplicationKit(params: {
   return response.json();
 }
 
+export interface TranslateCVResult {
+  paragraphs: CVParagraph[];
+  source_language: "fr" | "en";
+  target_language: "fr" | "en";
+  translated: boolean;
+}
+
+export async function translateCV(params: {
+  paragraphs: CVParagraph[];
+  targetLanguage: "fr" | "en";
+  llmProvider: "openai" | "groq" | "claude";
+  llmModel: string;
+}): Promise<TranslateCVResult> {
+  const response = await apiFetch(apiUrl("translate"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      paragraphs: params.paragraphs,
+      target_language: params.targetLanguage,
+      llm_provider: params.llmProvider,
+      llm_model: params.llmModel,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, "CV translation failed"));
+  }
+
+  return response.json();
+}
+
 export async function analyzeJob(params: {
   jobDescription: string;
   outputLanguage: "fr" | "en";

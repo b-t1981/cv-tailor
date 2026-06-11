@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { BackendConnectionBanner } from "@/components/BackendConnectionBanner";
 import { ApplicationHistoryPanel } from "@/components/ApplicationHistoryPanel";
@@ -18,6 +18,7 @@ import {
   fetchPrompts,
   previewCV,
   tailorCV,
+  translateCV,
   type CVParagraph,
   type JobAnalysisResult,
   type PromptConfig,
@@ -40,7 +41,13 @@ export default function HomePage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<TailorResult | null>(null);
+  const [baseParagraphs, setBaseParagraphs] = useState<CVParagraph[]>([]);
   const [originalParagraphs, setOriginalParagraphs] = useState<CVParagraph[]>([]);
+  const [cvSourceLanguage, setCvSourceLanguage] = useState<"fr" | "en" | null>(null);
+  const [translationLoading, setTranslationLoading] = useState(false);
+  const [translationError, setTranslationError] = useState<string | null>(null);
+  const [languageTouched, setLanguageTouched] = useState(false);
+  const translationCacheRef = useRef<Partial<Record<"fr" | "en", CVParagraph[]>>>({});
   const [previewFilename, setPreviewFilename] = useState<string>("");
   const [hasLlmConfigured, setHasLlmConfigured] = useState(true);
   const [analysis, setAnalysis] = useState<JobAnalysisResult | null>(null);
@@ -54,7 +61,6 @@ export default function HomePage() {
   } | null>(null);
   const [scoreBefore, setScoreBefore] = useState<number | null>(null);
   const [scoreAfter, setScoreAfter] = useState<number | null>(null);
-  const [showAdvancedLlm, setShowAdvancedLlm] = useState(false);
   const [invalidFileError, setInvalidFileError] = useState<string | null>(null);
   const [previewSlowHint, setPreviewSlowHint] = useState(false);
 
@@ -96,7 +102,12 @@ export default function HomePage() {
 
   const loadCvPreview = useCallback(async (selected: File, filename?: string) => {
     const preview = await previewCV(selected);
+    setBaseParagraphs(preview.paragraphs);
     setOriginalParagraphs(preview.paragraphs);
+    setCvSourceLanguage(null);
+    setLanguageTouched(true);
+    setTranslationError(null);
+    translationCacheRef.current = {};
     setPreviewFilename(filename ?? preview.filename);
     if (preview.paragraphs.length > 0) {
       setTimeout(() => {
@@ -129,9 +140,70 @@ export default function HomePage() {
     }
   }, [jobDescription, outputLanguage, llmProvider, llmModel, originalParagraphs, t]);
 
+  const handleOutputLanguageChange = useCallback((lang: "fr" | "en") => {
+    setLanguageTouched(true);
+    setOutputLanguage(lang);
+    setResult(null);
+    setExportUrls(null);
+    setAnalysis(null);
+    setAnalysisError(null);
+    setScoreBefore(null);
+    setScoreAfter(null);
+  }, []);
+
+  useEffect(() => {
+    if (!languageTouched || baseParagraphs.length === 0) return;
+
+    if (cvSourceLanguage === outputLanguage) {
+      setOriginalParagraphs(baseParagraphs);
+      return;
+    }
+
+    const cached = translationCacheRef.current[outputLanguage];
+    if (cached) {
+      setOriginalParagraphs(cached);
+      return;
+    }
+
+    let cancelled = false;
+    setTranslationLoading(true);
+    setTranslationError(null);
+
+    translateCV({
+      paragraphs: baseParagraphs,
+      targetLanguage: outputLanguage,
+      llmProvider,
+      llmModel,
+    })
+      .then((data) => {
+        if (cancelled) return;
+        setCvSourceLanguage(data.source_language);
+        translationCacheRef.current[data.source_language] = baseParagraphs;
+        if (data.translated) {
+          translationCacheRef.current[data.target_language] = data.paragraphs;
+          setOriginalParagraphs(data.paragraphs);
+        } else {
+          setOriginalParagraphs(baseParagraphs);
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setTranslationError(err instanceof Error ? err.message : t("error"));
+        setOriginalParagraphs(baseParagraphs);
+      })
+      .finally(() => {
+        if (!cancelled) setTranslationLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [languageTouched, outputLanguage, baseParagraphs, cvSourceLanguage, llmProvider, llmModel, t]);
+
   useEffect(() => {
     if (
       previewLoading ||
+      translationLoading ||
       originalParagraphs.length === 0 ||
       jobDescription.trim().length < 20 ||
       !hasLlmConfigured
@@ -147,6 +219,7 @@ export default function HomePage() {
     originalParagraphs,
     hasLlmConfigured,
     previewLoading,
+    translationLoading,
     handleAnalyze,
   ]);
 
@@ -234,7 +307,11 @@ export default function HomePage() {
     setAnalysis(null);
     setInvalidFileError(null);
     if (!selected) {
+      setBaseParagraphs([]);
       setOriginalParagraphs([]);
+      setCvSourceLanguage(null);
+      setLanguageTouched(false);
+      translationCacheRef.current = {};
       setPreviewFilename("");
       return;
     }
@@ -280,8 +357,10 @@ export default function HomePage() {
   };
 
   const hasCv = Boolean(file) && originalParagraphs.length > 0;
-  const canSubmit = hasCv && jobDescription.trim().length >= 20 && !loading && hasLlmConfigured;
-  const canAnalyze = hasCv && jobDescription.trim().length >= 20 && hasLlmConfigured && !analysisLoading;
+  const canSubmit =
+    hasCv && jobDescription.trim().length >= 20 && !loading && !translationLoading && hasLlmConfigured;
+  const canAnalyze =
+    hasCv && jobDescription.trim().length >= 20 && hasLlmConfigured && !analysisLoading && !translationLoading;
   const compareOriginal = result?.original_paragraphs ?? originalParagraphs;
   const acceptedCount = Object.keys(acceptedModifications).length;
 
@@ -397,24 +476,34 @@ export default function HomePage() {
             <label className="label">{t("outputLang")}</label>
             <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
               <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm sm:min-h-0">
-                <input type="radio" checked={outputLanguage === "fr"} onChange={() => setOutputLanguage("fr")} className="text-brand-600" />
+                <input
+                  type="radio"
+                  checked={outputLanguage === "fr"}
+                  onChange={() => handleOutputLanguageChange("fr")}
+                  className="text-brand-600"
+                />
                 {t("french")}
               </label>
               <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm sm:min-h-0">
-                <input type="radio" checked={outputLanguage === "en"} onChange={() => setOutputLanguage("en")} className="text-brand-600" />
+                <input
+                  type="radio"
+                  checked={outputLanguage === "en"}
+                  onChange={() => handleOutputLanguageChange("en")}
+                  className="text-brand-600"
+                />
                 {t("english")}
               </label>
             </div>
+            {translationLoading && (
+              <p className="mt-2 text-xs text-brand-700">{t("cvTranslateLoading")}</p>
+            )}
+            {translationError && (
+              <p className="mt-2 text-xs text-red-600">{translationError}</p>
+            )}
           </div>
 
-          <div className="mt-4">
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
-              <input type="checkbox" checked={showAdvancedLlm} onChange={(e) => setShowAdvancedLlm(e.target.checked)} />
-              {t("advancedLlm")}
-            </label>
-          </div>
           <LLMSelector
-            hidden={!showAdvancedLlm}
+            hidden
             provider={llmProvider}
             model={llmModel}
             onChange={(p, m) => {

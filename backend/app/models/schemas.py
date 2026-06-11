@@ -159,6 +159,20 @@ class ApplicationKitResponse(BaseModel):
     summary: str
 
 
+class TranslateCVRequest(BaseModel):
+    paragraphs: list[ParagraphInfo] = Field(..., min_length=1)
+    target_language: str = Field(..., pattern="^(fr|en)$")
+    llm_provider: str = Field(default="openai", pattern="^(openai|groq|claude)$")
+    llm_model: str | None = None
+
+
+class TranslateCVResponse(BaseModel):
+    paragraphs: list[ParagraphInfo]
+    source_language: str
+    target_language: str
+    translated: bool
+
+
 class HealthResponse(BaseModel):
     status: str
     default_provider: str

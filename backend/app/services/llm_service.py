@@ -197,10 +197,15 @@ class LLMService:
             "- score: 0-100 realistic match\n"
             "- strengths: CV elements aligned with the job\n"
             "- gaps: genuine missing requirements only\n"
-            "- present_keywords: important job keywords/skills/tools ALREADY in the CV (max 12)\n"
-            "- missing_keywords: important job keywords/skills/tools NOT in the CV (max 12)\n"
+            "- present_keywords: terms that appear in BOTH the job description AND the CV (max 12)\n"
+            "- missing_keywords: terms that appear in the job description but NOT in the CV (max 12)\n"
+            "- NEVER put a keyword in missing_keywords if it appears anywhere in the CV text\n"
+            "- NEVER put a keyword in missing_keywords if it does NOT appear in the job description\n"
+            "- NEVER list CV-only skills/tools in missing_keywords\n"
             "- keyword_suggestions: actionable tips to address missing keywords HONESTLY "
             "(e.g. mention a related project if in CV, or develop the skill — max 6)\n"
+            "- gaps: job requirements from the offer NOT evidenced in the CV (do not invent gaps "
+            "for tools that are already in the CV)\n"
             "- Only list concrete skills, tools, technologies, certifications, or domain terms\n"
             "- Do NOT invent CV content\n\n"
             "Respond ONLY with valid JSON:\n"
@@ -233,7 +238,8 @@ class LLMService:
                 ) from exc
             raise ValueError(f"{PROVIDER_LABELS[selected_provider]} request failed: {exc}") from exc
 
-        return self._parse_analysis_response(content)
+        result = self._parse_analysis_response(content)
+        return self._sanitize_analysis_keywords(job_description, cv_paragraphs, result)
 
     def generate_application_kit(
         self,
@@ -396,6 +402,62 @@ class LLMService:
         return cleaned, summary
 
     @staticmethod
+    def _keyword_search_variants(keyword: str) -> list[str]:
+        cleaned = keyword.strip().lower()
+        variants = [cleaned] if cleaned else []
+        variants.extend(match.lower() for match in re.findall(r"\(([^)]+)\)", keyword))
+        for part in re.split(r"[,/|]+", keyword):
+            part = part.strip().lower()
+            if len(part) > 2:
+                variants.append(part)
+        deduped: list[str] = []
+        for variant in variants:
+            if variant and variant not in deduped:
+                deduped.append(variant)
+        return deduped
+
+    @classmethod
+    def _term_in_text(cls, keyword: str, text: str) -> bool:
+        text_lower = text.lower()
+        return any(variant in text_lower for variant in cls._keyword_search_variants(keyword))
+
+    @classmethod
+    def _sanitize_analysis_keywords(
+        cls,
+        job_description: str,
+        cv_paragraphs: str,
+        result: dict,
+    ) -> dict:
+        present: list[str] = []
+        missing: list[str] = []
+        seen: set[str] = set()
+
+        for keyword in result.get("present_keywords", []):
+            key = keyword.strip().lower()
+            if not key or key in seen:
+                continue
+            if cls._term_in_text(keyword, cv_paragraphs):
+                present.append(keyword)
+                seen.add(key)
+
+        for keyword in result.get("missing_keywords", []):
+            key = keyword.strip().lower()
+            if not key or key in seen:
+                continue
+            if not cls._term_in_text(keyword, job_description):
+                continue
+            if cls._term_in_text(keyword, cv_paragraphs):
+                present.append(keyword)
+                seen.add(key)
+                continue
+            missing.append(keyword)
+            seen.add(key)
+
+        result["present_keywords"] = present[:12]
+        result["missing_keywords"] = missing[:12]
+        return result
+
+    @staticmethod
     def _parse_analysis_response(content: str) -> dict:
         try:
             data = json.loads(content)
@@ -435,6 +497,93 @@ class LLMService:
         strengths = [str(item) for item in data.get("strengths", []) if item]
         gaps = [str(item) for item in data.get("gaps", []) if item]
         return {"score": score, "summary": summary, "strengths": strengths, "gaps": gaps}
+
+    def translate_cv(
+        self,
+        cv_paragraphs: str,
+        target_language: str,
+        provider: LLMProvider | None = None,
+        model: str | None = None,
+    ) -> dict:
+        selected_provider = provider or settings.default_llm_provider
+        selected_model = model or settings.default_model_for(selected_provider)
+
+        if not settings.is_provider_configured(selected_provider):
+            raise ValueError(f"{PROVIDER_LABELS[selected_provider]} API key is not configured")
+
+        target_label = "French" if target_language == "fr" else "English"
+        system_prompt = (
+            "You are a professional CV translator.\n"
+            "Detect the main language of the CV (fr or en).\n"
+            f"If the CV is already in {target_label}, return an empty translations object.\n"
+            "Otherwise translate each line to "
+            f"{target_label}.\n\n"
+            "RULES:\n"
+            "- Translate [TEXT] lines and standard section [HEADING] titles.\n"
+            "- Do NOT translate: person names, company names, emails, URLs, phone numbers, "
+            "dates, job titles at companies, city/country names when used as locations.\n"
+            "- Keep one line per ID; never merge lines.\n"
+            "- Preserve facts and metrics exactly.\n\n"
+            "Respond ONLY with valid json:\n"
+            '{"source_language": "fr", "translations": {"block_id": "translated text"}}'
+        )
+        user_prompt = (
+            f"Target language: {target_label}\n\n"
+            f"## CV Content\n{cv_paragraphs}\n\n"
+            "Detect language and translate lines that need translation."
+        )
+
+        try:
+            if selected_provider == "claude":
+                content = self._call_claude(system_prompt, user_prompt, selected_model, temperature=0.1)
+            else:
+                content = self._call_openai_compatible(
+                    provider=selected_provider,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    model=selected_model,
+                    temperature=0.1,
+                )
+        except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
+            if self._is_api_key_error(exc):
+                raise ValueError(
+                    f"{PROVIDER_LABELS[selected_provider]} API key is invalid. "
+                    f"Check {selected_provider.upper()}_API_KEY in backend/.env"
+                ) from exc
+            raise ValueError(f"{PROVIDER_LABELS[selected_provider]} request failed: {exc}") from exc
+
+        return self._parse_translate_response(content, target_language)
+
+    @staticmethod
+    def _parse_translate_response(content: str, target_language: str) -> dict:
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", content, re.DOTALL)
+            if not match:
+                raise ValueError("LLM returned invalid JSON") from None
+            data = json.loads(match.group())
+
+        source_language = str(data.get("source_language", "")).lower()
+        if source_language not in ("fr", "en"):
+            source_language = "fr" if target_language == "en" else "en"
+
+        raw_translations = data.get("translations", {})
+        if not isinstance(raw_translations, dict):
+            raw_translations = {}
+
+        translations = {str(key): str(value) for key, value in raw_translations.items() if value}
+        translated = source_language != target_language and len(translations) > 0
+        if source_language == target_language:
+            translations = {}
+            translated = False
+
+        return {
+            "source_language": source_language,
+            "target_language": target_language,
+            "translations": translations,
+            "translated": translated,
+        }
 
 
 llm_service = LLMService()
