@@ -39,11 +39,12 @@ PROVIDER_LABELS = {
 
 OpenAICompatibleProvider = Literal["openai", "groq", "cerebras"]
 
+# llama-3.3-70b retiré de l'API publique Cerebras — utiliser gpt-oss-120b (prod).
 _GROQ_TO_CEREBRAS_MODEL: dict[str, str] = {
-    "llama-3.3-70b-versatile": "llama-3.3-70b",
-    "llama-3.1-8b-instant": "llama3.1-8b",
-    "mixtral-8x7b-32768": "llama-3.3-70b",
-    "gemma2-9b-it": "llama3.1-8b",
+    "llama-3.3-70b-versatile": "gpt-oss-120b",
+    "llama-3.1-8b-instant": "gpt-oss-120b",
+    "mixtral-8x7b-32768": "gpt-oss-120b",
+    "gemma2-9b-it": "gpt-oss-120b",
 }
 
 _groq_cooldown_until: float = 0.0
@@ -271,6 +272,12 @@ class LLMService:
 
         if status in (502, 504) or "timeout" in msg:
             return f"Le service {label} ne répond pas. Réessayez dans quelques minutes."
+
+        if status == 400 and ("model" in msg or "wrong_api_format" in msg):
+            return f"Modèle {label} indisponible ou requête invalide. Contactez l'administrateur du service."
+
+        if status == 404 or "model not found" in msg or "does not exist" in msg:
+            return f"Modèle {label} introuvable. Contactez l'administrateur du service."
 
         return f"Le service {label} est momentanément indisponible. Réessayez dans quelques minutes."
 
@@ -695,15 +702,20 @@ class LLMService:
             )
             system_prompt, user_prompt = self._prepare_groq_messages(system_prompt, user_prompt)
 
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
+        request_kwargs: dict = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=temperature,
-            response_format={"type": "json_object"},
-        )
+            "temperature": temperature,
+            "response_format": {"type": "json_object"},
+            "max_completion_tokens": 4096,
+        }
+        if provider == "cerebras" and model.startswith("gpt-oss"):
+            request_kwargs["reasoning_effort"] = "low"
+
+        response = client.chat.completions.create(**request_kwargs)
         return response.choices[0].message.content or "{}"
 
     def _call_claude(self, system_prompt: str, user_prompt: str, model: str, temperature: float = 0.1) -> str:

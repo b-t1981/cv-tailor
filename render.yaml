@@ -15,7 +15,7 @@ services:
       - key: CEREBRAS_API_KEY
         sync: false
       - key: CEREBRAS_MODEL
-        value: llama-3.3-70b
+        value: gpt-oss-120b
       - key: DEEPL_API_KEY
         sync: false
       - key: DEEPL_USE_FREE_API

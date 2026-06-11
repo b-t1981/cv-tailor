@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
     cerebras_api_key: str = ""
-    cerebras_model: str = "llama-3.3-70b"
+    cerebras_model: str = "gpt-oss-120b"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
     default_llm_provider: LLMProvider = "openai"

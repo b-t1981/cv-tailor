@@ -6,8 +6,8 @@ from app.services.llm_service import LLMService, _GROQ_TO_CEREBRAS_MODEL
 
 
 def test_groq_to_cerebras_model_mapping():
-    assert _GROQ_TO_CEREBRAS_MODEL["llama-3.3-70b-versatile"] == "llama-3.3-70b"
-    assert _GROQ_TO_CEREBRAS_MODEL["llama-3.1-8b-instant"] == "llama3.1-8b"
+    assert _GROQ_TO_CEREBRAS_MODEL["llama-3.3-70b-versatile"] == "gpt-oss-120b"
+    assert _GROQ_TO_CEREBRAS_MODEL["llama-3.1-8b-instant"] == "gpt-oss-120b"
 
 
 def test_is_rate_limit_error_detects_429():
