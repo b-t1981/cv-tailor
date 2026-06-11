@@ -1,8 +1,8 @@
+import os
 import secrets
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LLMProvider = Literal["openai", "groq", "claude"]
@@ -18,10 +18,7 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
-    cerebras_api_key: str = Field(
-        default="",
-        validation_alias=AliasChoices("CEREBRAS_API_KEY", "CEREBAS_API_KEY"),
-    )
+    cerebras_api_key: str = ""
     cerebras_model: str = "llama-3.3-70b"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
@@ -121,14 +118,24 @@ class Settings(BaseSettings):
         lowered = key.lower()
         return not any(marker in lowered for marker in ("your-deepl", "changeme", "example", "placeholder"))
 
+    def get_cerebras_api_key(self) -> str:
+        key = self.cerebras_api_key.strip()
+        if key:
+            return key
+        for env_name in ("CEREBRAS_API_KEY", "CEREBAS_API_KEY"):
+            env_val = os.environ.get(env_name, "").strip()
+            if env_val:
+                return env_val
+        return ""
+
     def is_cerebras_fallback_available(self) -> bool:
-        return self.is_provider_configured("cerebras")
+        return self._is_valid_api_key(self.get_cerebras_api_key())
 
     def is_provider_configured(self, provider: str) -> bool:
         keys = {
             "openai": self.openai_api_key,
             "groq": self.groq_api_key,
-            "cerebras": self.cerebras_api_key,
+            "cerebras": self.get_cerebras_api_key(),
             "claude": self.anthropic_api_key,
         }
         key = keys.get(provider, "")

@@ -20,6 +20,16 @@ def test_is_rate_limit_error_detects_message():
     assert LLMService._is_rate_limit_error(exc) is True
 
 
+def test_get_cerebras_api_key_reads_env(monkeypatch):
+    from app.config import Settings
+
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    monkeypatch.delenv("CEREBAS_API_KEY", raising=False)
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk-test-key-12345678901234567890")
+    cfg = Settings()
+    assert cfg.get_cerebras_api_key().startswith("csk-test")
+
+
 def test_call_llm_falls_back_to_cerebras_on_groq_429():
     service = LLMService()
     rate_exc = RateLimitError(

@@ -3,6 +3,7 @@ import logging
 import re
 import time
 import unicodedata
+from pathlib import Path
 from typing import Literal
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,10 @@ _GROQ_TO_CEREBRAS_MODEL: dict[str, str] = {
 }
 
 _groq_cooldown_until: float = 0.0
+
+
+def _groq_cooldown_path() -> Path:
+    return settings.base_dir / ".groq_cooldown"
 
 # Ordre = priorité (le plus spécifique en premier). Pas de "mission" seul (matche "Our Purpose and Mission").
 _CORE_JOB_MARKERS = (
@@ -306,15 +311,38 @@ class LLMService:
         return "rate_limit_exceeded" in msg or "rate limit" in msg or "error code: 429" in msg
 
     @classmethod
+    def load_groq_cooldown(cls) -> None:
+        global _groq_cooldown_until
+        path = _groq_cooldown_path()
+        if not path.is_file():
+            return
+        try:
+            stored = float(path.read_text(encoding="utf-8").strip())
+            if stored > time.monotonic():
+                _groq_cooldown_until = stored
+                logger.info("Groq cooldown loaded from disk")
+        except (OSError, ValueError):
+            pass
+
+    @classmethod
     def _mark_groq_rate_limited(cls, exc: Exception) -> None:
         global _groq_cooldown_until
         wait = cls._extract_retry_seconds(str(exc))
         _groq_cooldown_until = time.monotonic() + (wait if wait else 3600)
         logger.warning("Groq rate limit — cooldown %ss", wait or 3600)
+        try:
+            _groq_cooldown_path().write_text(str(_groq_cooldown_until), encoding="utf-8")
+        except OSError:
+            pass
 
     @staticmethod
     def is_groq_in_cooldown() -> bool:
         return time.monotonic() < _groq_cooldown_until
+
+    def _is_groq_quota_error(self, exc: Exception) -> bool:
+        return self._is_rate_limit_error(exc) or (
+            self._is_raw_provider_api_error(exc) and "429" in str(exc)
+        )
 
     def _cerebras_model_for(self, groq_model: str) -> str:
         return _GROQ_TO_CEREBRAS_MODEL.get(groq_model, settings.cerebras_model)
@@ -336,6 +364,44 @@ class LLMService:
             temperature=temperature,
         )
 
+    def _call_groq_with_cerebras_fallback(
+        self,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float,
+    ) -> str:
+        if self.is_groq_in_cooldown():
+            logger.info("Groq in cooldown — using Cerebras directly")
+            return self._call_cerebras_fallback(model, system_prompt, user_prompt, temperature)
+
+        try:
+            return self._call_openai_compatible(
+                provider="groq",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=model,
+                temperature=temperature,
+            )
+        except Exception as exc:
+            if not self._is_groq_quota_error(exc):
+                self._handle_provider_exception(exc, "groq")
+
+            self._mark_groq_rate_limited(exc)
+            if not settings.is_cerebras_fallback_available():
+                logger.error("Groq quota reached but CEREBRAS_API_KEY is missing or invalid")
+                wait = self._extract_retry_seconds(str(exc))
+                wait_hint = self._format_wait_hint(wait) if wait else "quelques minutes"
+                raise ValueError(
+                    f"Quota Groq atteint pour aujourd'hui. Réessayez dans {wait_hint}. "
+                    "Repli Cerebras non actif : ajoutez CEREBRAS_API_KEY sur Render."
+                ) from exc
+
+            try:
+                return self._call_cerebras_fallback(model, system_prompt, user_prompt, temperature)
+            except Exception as fallback_exc:
+                self._handle_provider_exception(fallback_exc, "cerebras")
+
     def _call_llm(
         self,
         provider: str,
@@ -344,17 +410,10 @@ class LLMService:
         user_prompt: str,
         temperature: float = 0.1,
     ) -> str:
-        if (
-            provider == "groq"
-            and self.is_groq_in_cooldown()
-            and settings.is_cerebras_fallback_available()
-        ):
-            try:
-                return self._call_cerebras_fallback(
-                    model, system_prompt, user_prompt, temperature
-                )
-            except Exception as fallback_exc:
-                self._handle_provider_exception(fallback_exc, "cerebras")
+        if provider == "groq" and settings.is_cerebras_fallback_available():
+            return self._call_groq_with_cerebras_fallback(
+                model, system_prompt, user_prompt, temperature
+            )
 
         try:
             if provider == "claude":
@@ -367,18 +426,8 @@ class LLMService:
                 temperature=temperature,
             )
         except Exception as exc:
-            if provider == "groq" and self._is_rate_limit_error(exc):
+            if provider == "groq" and self._is_groq_quota_error(exc):
                 self._mark_groq_rate_limited(exc)
-                if settings.is_cerebras_fallback_available():
-                    try:
-                        return self._call_cerebras_fallback(
-                            model, system_prompt, user_prompt, temperature
-                        )
-                    except Exception as fallback_exc:
-                        self._handle_provider_exception(fallback_exc, "cerebras")
-                logger.error(
-                    "Groq quota reached but CEREBRAS_API_KEY is missing or invalid on the server"
-                )
                 wait = self._extract_retry_seconds(str(exc))
                 wait_hint = self._format_wait_hint(wait) if wait else "quelques minutes"
                 raise ValueError(
@@ -641,7 +690,7 @@ class LLMService:
             system_prompt, user_prompt = self._prepare_groq_messages(system_prompt, user_prompt)
         else:
             client = OpenAI(
-                api_key=settings.cerebras_api_key,
+                api_key=settings.get_cerebras_api_key(),
                 base_url="https://api.cerebras.ai/v1",
             )
             system_prompt, user_prompt = self._prepare_groq_messages(system_prompt, user_prompt)
