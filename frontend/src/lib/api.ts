@@ -45,10 +45,47 @@ function apiFetch(input: string, init?: RequestInit, timeoutMs = 120_000): Promi
     });
 }
 
+function sanitizeApiErrorMessage(detail: string): string {
+  if (detail.startsWith("Quota ") || detail.startsWith("Clé API ") || detail.startsWith("Le service ")) {
+    return detail;
+  }
+
+  const lower = detail.toLowerCase();
+  const provider =
+    detail.match(/^(OpenAI|Groq|Claude) request failed/i)?.[1] ??
+    (lower.includes("groq") ? "Groq" : lower.includes("openai") ? "OpenAI" : lower.includes("claude") ? "Claude" : null);
+
+  if (
+    lower.includes("rate_limit") ||
+    lower.includes("rate limit") ||
+    detail.includes("429")
+  ) {
+    const waitMatch = detail.match(/try again in (\d+)m(\d+(?:\.\d+)?)?s/i);
+    let waitHint = "quelques minutes";
+    if (waitMatch) {
+      const totalSec =
+        parseInt(waitMatch[1], 10) * 60 + Math.floor(parseFloat(waitMatch[2] || "0"));
+      const minutes = Math.max(1, Math.round(totalSec / 60));
+      waitHint = minutes === 1 ? "environ 1 minute" : `environ ${minutes} minutes`;
+    }
+    return `Quota ${provider ?? "IA"} atteint pour aujourd'hui. Réessayez dans ${waitHint}.`;
+  }
+
+  if (lower.includes("invalid_api_key") || lower.includes("authentication") || detail.includes("401")) {
+    return `Clé API ${provider ?? "IA"} invalide. Contactez l'administrateur du service.`;
+  }
+
+  if (provider && (detail.includes("Error code:") || lower.includes("request failed"))) {
+    return `Le service ${provider} est momentanément indisponible. Réessayez dans quelques minutes.`;
+  }
+
+  return detail;
+}
+
 async function readApiError(response: Response, fallback: string): Promise<string> {
   const payload = await response.json().catch(() => null);
   if (payload && typeof payload.detail === "string") {
-    return payload.detail;
+    return sanitizeApiErrorMessage(payload.detail);
   }
   if (response.status === 404) {
     const onVercel =

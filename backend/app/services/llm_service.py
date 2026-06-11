@@ -253,9 +253,30 @@ class LLMService:
 
         return f"Le service {label} est momentanément indisponible. Réessayez dans quelques minutes."
 
+    @staticmethod
+    def _is_raw_provider_api_error(exc: Exception) -> bool:
+        msg = str(exc).lower()
+        return any(
+            marker in msg
+            for marker in (
+                "request failed: error code",
+                "rate_limit_exceeded",
+                "rate limit reached",
+                "error code: 429",
+            )
+        )
+
     @classmethod
     def _raise_provider_error(cls, exc: Exception, provider: str) -> None:
         raise ValueError(cls._format_provider_error(exc, provider)) from exc
+
+    @classmethod
+    def _handle_provider_exception(cls, exc: Exception, provider: str) -> None:
+        if isinstance(exc, (AuthenticationError, AnthropicAuthError, APIStatusError)):
+            cls._raise_provider_error(exc, provider)
+        if cls._is_raw_provider_api_error(exc):
+            cls._raise_provider_error(exc, provider)
+        raise exc
 
     def list_providers(self) -> LLMProvidersResponse:
         providers = [
@@ -317,8 +338,8 @@ class LLMService:
                     model=selected_model,
                     temperature=temperature,
                 )
-        except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
-            self._raise_provider_error(exc, selected_provider)
+        except Exception as exc:
+            self._handle_provider_exception(exc, selected_provider)
 
         return self._parse_response(content)
 
@@ -367,8 +388,8 @@ class LLMService:
                     user_prompt=user_prompt,
                     model=selected_model,
                 )
-        except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
-            self._raise_provider_error(exc, selected_provider)
+        except Exception as exc:
+            self._handle_provider_exception(exc, selected_provider)
 
         return self._parse_match_response(content)
 
@@ -433,8 +454,8 @@ class LLMService:
                     user_prompt=user_prompt,
                     model=selected_model,
                 )
-        except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
-            self._raise_provider_error(exc, selected_provider)
+        except Exception as exc:
+            self._handle_provider_exception(exc, selected_provider)
 
         result = self._parse_analysis_response(content)
         result = self._sanitize_analysis_keywords(job_description, cv_paragraphs, result)
@@ -505,8 +526,8 @@ class LLMService:
                     model=selected_model,
                     temperature=0.4,
                 )
-        except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
-            self._raise_provider_error(exc, selected_provider)
+        except Exception as exc:
+            self._handle_provider_exception(exc, selected_provider)
 
         return self._parse_application_kit(content)
 
@@ -861,8 +882,8 @@ class LLMService:
                     model=selected_model,
                     temperature=0.1,
                 )
-        except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
-            self._raise_provider_error(exc, selected_provider)
+        except Exception as exc:
+            self._handle_provider_exception(exc, selected_provider)
 
         return self._parse_translate_response(content, target_language)
 

@@ -36,6 +36,7 @@ from app.services.cv_tailor import cv_tailor_service
 from app.services.llm_service import llm_service
 from app.services.match_service import match_service
 from app.services.prompt_service import prompt_service
+from app.api.http_errors import raise_as_http
 from app.session import get_session_id
 
 router = APIRouter()
@@ -163,12 +164,8 @@ async def generate_application_kit(
     try:
         result = application_service.generate_kit(session_id, payload)
         return ApplicationKitResponse(**result)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        message = str(exc)
-        status_code = 400 if "API key" in message else 500
-        raise HTTPException(status_code=status_code, detail=message) from exc
+        raise_as_http(exc, provider=payload.llm_provider)
 
 
 @router.post("/analyze", response_model=JobAnalysisResponse)
@@ -195,12 +192,8 @@ async def analyze_job(request: Request, payload: JobAnalysisRequest) -> JobAnaly
                 llm_model=payload.llm_model,
             )
         return JobAnalysisResponse(**result)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        message = str(exc)
-        status_code = 400 if "API key" in message else 500
-        raise HTTPException(status_code=status_code, detail=message) from exc
+        raise_as_http(exc, provider=payload.llm_provider)
 
 
 @router.post("/tailor/retry", response_model=RetryModificationsResponse)
@@ -227,10 +220,8 @@ async def retry_tailor_modifications(
             kept_modifications=payload.kept_modifications,
         )
         return RetryModificationsResponse(**result)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Retry failed: {exc}") from exc
+        raise_as_http(exc, provider=payload.llm_provider)
 
 
 @router.post("/tailor/apply", response_model=ApplyModificationsResponse)
@@ -272,12 +263,8 @@ async def compute_match(request: Request, payload: MatchScoreRequest) -> MatchSc
                 llm_model=payload.llm_model,
             )
         return MatchScoreResponse(**result)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        message = str(exc)
-        status_code = 400 if "API key" in message else 500
-        raise HTTPException(status_code=status_code, detail=message) from exc
+        raise_as_http(exc, provider=payload.llm_provider)
 
 
 @router.post("/translate", response_model=TranslateCVResponse)
@@ -293,12 +280,8 @@ async def translate_cv(request: Request, payload: TranslateCVRequest) -> Transla
             llm_model=payload.llm_model,
         )
         return TranslateCVResponse(**result)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        message = str(exc)
-        status_code = 400 if "API key" in message else 500
-        raise HTTPException(status_code=status_code, detail=message) from exc
+        raise_as_http(exc, provider=payload.llm_provider)
 
 
 @router.post("/preview", response_model=CVPreviewResponse)
@@ -405,12 +388,8 @@ async def tailor_cv(
         cv_storage_service.save(session_id, upload_path, original_filename, result["original_paragraphs"])
 
         return TailorResponse(**result)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        message = str(exc)
-        status_code = 400 if "API key" in message or "not configured" in message else 500
-        raise HTTPException(status_code=status_code, detail=message) from exc
+        raise_as_http(exc, provider=llm_provider)
     finally:
         if upload_path.exists():
             upload_path.unlink()
