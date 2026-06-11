@@ -129,6 +129,27 @@ export default function HomePage() {
     }
   }, [jobDescription, outputLanguage, llmProvider, llmModel, originalParagraphs, t]);
 
+  useEffect(() => {
+    if (
+      previewLoading ||
+      originalParagraphs.length === 0 ||
+      jobDescription.trim().length < 20 ||
+      !hasLlmConfigured
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void handleAnalyze();
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [
+    jobDescription,
+    originalParagraphs,
+    hasLlmConfigured,
+    previewLoading,
+    handleAnalyze,
+  ]);
+
   const handleAcceptedChange = useCallback((accepted: Record<string, string>) => {
     setAcceptedModifications(accepted);
     setExportUrls(null);

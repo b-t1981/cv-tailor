@@ -32,6 +32,24 @@ PROVIDER_LABELS = {
 
 
 class LLMService:
+    @staticmethod
+    def _is_api_key_error(exc: Exception) -> bool:
+        if isinstance(exc, (AuthenticationError, AnthropicAuthError)):
+            return True
+        if getattr(exc, "status_code", None) == 401:
+            return True
+        msg = str(exc).lower()
+        return any(
+            marker in msg
+            for marker in (
+                "invalid_api_key",
+                "incorrect api key",
+                "invalid x-api-key",
+                "authentication",
+                "unauthorized",
+            )
+        )
+
     def list_providers(self) -> LLMProvidersResponse:
         providers = [
             LLMProviderInfo(
@@ -93,7 +111,7 @@ class LLMService:
                     temperature=temperature,
                 )
         except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
-            if getattr(exc, "status_code", None) == 401 or "invalid" in str(exc).lower():
+            if self._is_api_key_error(exc):
                 raise ValueError(
                     f"{PROVIDER_LABELS[selected_provider]} API key is invalid. "
                     f"Check {selected_provider.upper()}_API_KEY in backend/.env"
@@ -148,7 +166,7 @@ class LLMService:
                     model=selected_model,
                 )
         except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
-            if getattr(exc, "status_code", None) == 401 or "invalid" in str(exc).lower():
+            if self._is_api_key_error(exc):
                 raise ValueError(
                     f"{PROVIDER_LABELS[selected_provider]} API key is invalid. "
                     f"Check {selected_provider.upper()}_API_KEY in backend/.env"
@@ -208,7 +226,7 @@ class LLMService:
                     model=selected_model,
                 )
         except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
-            if getattr(exc, "status_code", None) == 401 or "invalid" in str(exc).lower():
+            if self._is_api_key_error(exc):
                 raise ValueError(
                     f"{PROVIDER_LABELS[selected_provider]} API key is invalid. "
                     f"Check {selected_provider.upper()}_API_KEY in backend/.env"
@@ -282,7 +300,7 @@ class LLMService:
                     temperature=0.4,
                 )
         except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
-            if getattr(exc, "status_code", None) == 401 or "invalid" in str(exc).lower():
+            if self._is_api_key_error(exc):
                 raise ValueError(
                     f"{PROVIDER_LABELS[selected_provider]} API key is invalid. "
                     f"Check {selected_provider.upper()}_API_KEY in backend/.env"
