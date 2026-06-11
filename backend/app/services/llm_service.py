@@ -309,6 +309,13 @@ class LLMService:
 
         return self._parse_application_kit(content)
 
+    @staticmethod
+    def _prepare_groq_messages(system_prompt: str, user_prompt: str) -> tuple[str, str]:
+        """Groq requires the literal word 'json' in messages when using response_format json_object."""
+        if not user_prompt.rstrip().lower().endswith("respond in json."):
+            user_prompt = f"{user_prompt.rstrip()}\n\nRespond in json."
+        return system_prompt, user_prompt
+
     def _call_openai_compatible(
         self,
         provider: Literal["openai", "groq"],
@@ -324,6 +331,7 @@ class LLMService:
                 api_key=settings.groq_api_key,
                 base_url="https://api.groq.com/openai/v1",
             )
+            system_prompt, user_prompt = self._prepare_groq_messages(system_prompt, user_prompt)
 
         response = client.chat.completions.create(
             model=model,

@@ -146,6 +146,7 @@ def test_download_cross_session_denied() -> dict:
 
 def test_prompts_locked() -> dict:
     from app.config import settings
+    from app.services.prompt_service import prompt_service
 
     payload = {
         "system_prompt": "Concurrent probe system prompt " + ("x" * 40),
@@ -155,6 +156,7 @@ def test_prompts_locked() -> dict:
         status = client.put("/prompts", json=payload).status_code
 
     if settings.allow_prompt_writes:
+        prompt_service.reset()
         return {
             "name": "prompts_locked",
             "ok": status == 200,

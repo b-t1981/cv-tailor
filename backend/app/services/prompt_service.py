@@ -11,9 +11,15 @@ class PromptService:
         self._template_path = self._path.parent / "default_prompts.template.json"
 
     def load(self) -> PromptConfig:
+        if not self._path.exists():
+            return self.reset()
         with open(self._path, encoding="utf-8") as file:
             data = json.load(file)
-        return PromptConfig(**data)
+        config = PromptConfig(**data)
+        combined = f"{config.system_prompt}\n{config.user_prompt}".lower()
+        if "json" not in combined or len(config.system_prompt.strip()) < 80:
+            return self.reset()
+        return config
 
     def save(self, config: PromptConfig) -> PromptConfig:
         self._path.parent.mkdir(parents=True, exist_ok=True)
