@@ -330,6 +330,13 @@ export default function HomePage() {
             rows={8}
             className="input-field"
           />
+          <p
+            className={`mt-1 text-right text-xs ${
+              jobDescription.trim().length >= 20 ? "text-slate-500" : "text-amber-600"
+            }`}
+          >
+            {jobDescription.length} {t("jobCharCount")}
+          </p>
           <div className="mt-4">
             <JobAnalysisPanel
               analysis={analysis}
