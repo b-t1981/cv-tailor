@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { translations, type Locale, type TranslationKey } from "./translations";
 
 interface I18nContextValue {
@@ -11,8 +11,22 @@ interface I18nContextValue {
 
 const I18nContext = createContext<I18nContextValue | null>(null);
 
+const LOCALE_KEY = "cv-tailor-locale";
+
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocale] = useState<Locale>("fr");
+  const [locale, setLocaleState] = useState<Locale>("fr");
+
+  useEffect(() => {
+    const saved = localStorage.getItem(LOCALE_KEY) as Locale | null;
+    if (saved === "fr" || saved === "en") {
+      setLocaleState(saved);
+    }
+  }, []);
+
+  const setLocale = (next: Locale) => {
+    setLocaleState(next);
+    localStorage.setItem(LOCALE_KEY, next);
+  };
 
   const value = useMemo(
     () => ({

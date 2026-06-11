@@ -2,35 +2,83 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from app.config import settings
 from app.models.schemas import (
     ApplicationKitRequest,
     ApplicationKitResponse,
+    ApplyModificationsRequest,
+    ApplyModificationsResponse,
+    CoverLetterExportRequest,
+    CoverLetterExportResponse,
     CVPreviewResponse,
     HealthResponse,
+    JobAnalysisRequest,
+    JobAnalysisResponse,
     LLMProvidersResponse,
     MatchScoreRequest,
     MatchScoreResponse,
     PromptConfig,
     PromptUpdateRequest,
-    StoredCVResponse,
+    RetryModificationsRequest,
+    RetryModificationsResponse,
     TailorRequest,
     TailorResponse,
 )
 from app.services.application_service import application_service
-from app.services.cv_extractor import extract_cv_paragraphs
+from app.services.cover_letter_exporter import export_cover_letter_docx, export_cover_letter_pdf
 from app.services.cv_storage_service import cv_storage_service
 from app.services.cv_tailor import cv_tailor_service
 from app.services.llm_service import llm_service
 from app.services.match_service import match_service
 from app.services.prompt_service import prompt_service
+from app.session import get_session_id
 
 router = APIRouter()
 
 ALLOWED_EXTENSIONS = {".docx", ".pdf"}
+
+
+def _safe_upload_name(filename: str) -> str:
+    name = Path(filename).name.strip()
+    if not name or name in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    return name
+
+
+def _enforce_upload_size(path: Path) -> None:
+    if path.stat().st_size > settings.max_upload_bytes:
+        path.unlink(missing_ok=True)
+        max_mb = settings.max_upload_bytes // (1024 * 1024)
+        raise HTTPException(status_code=400, detail=f"File too large (max {max_mb} MB)")
+
+
+def _require_prompt_admin(request: Request) -> None:
+    if settings.allow_prompt_writes:
+        return
+    token = request.headers.get("X-Admin-Token")
+    if settings.is_admin_token_valid(token):
+        return
+    raise HTTPException(status_code=403, detail="Prompt editing is disabled")
+
+
+def _resolve_session_download(session_id: str, filename: str) -> Path:
+    safe_name = Path(filename).name
+    if not safe_name or safe_name != filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    session_dir = settings.session_output_path(session_id).resolve()
+    file_path = (session_dir / safe_name).resolve()
+    try:
+        file_path.relative_to(session_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="File not found") from exc
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return file_path
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -57,7 +105,8 @@ async def get_prompts() -> PromptConfig:
 
 
 @router.put("/prompts", response_model=PromptConfig)
-async def update_prompts(payload: PromptUpdateRequest) -> PromptConfig:
+async def update_prompts(request: Request, payload: PromptUpdateRequest) -> PromptConfig:
+    _require_prompt_admin(request)
     config = PromptConfig(
         system_prompt=payload.system_prompt,
         user_prompt=payload.user_prompt,
@@ -66,55 +115,51 @@ async def update_prompts(payload: PromptUpdateRequest) -> PromptConfig:
 
 
 @router.post("/prompts/reset", response_model=PromptConfig)
-async def reset_prompts() -> PromptConfig:
+async def reset_prompts(request: Request) -> PromptConfig:
+    _require_prompt_admin(request)
     return prompt_service.reset()
 
 
-@router.get("/cv/last", response_model=StoredCVResponse)
-async def get_last_cv() -> StoredCVResponse:
-    metadata = cv_storage_service.load_metadata()
-    if not metadata:
-        raise HTTPException(status_code=404, detail="No CV in memory")
-
-    file_path = cv_storage_service.get_file_path()
-    paragraphs = metadata["paragraphs"]
-    if file_path:
-        fresh_paragraphs = extract_cv_paragraphs(file_path)
-        if fresh_paragraphs:
-            paragraphs = fresh_paragraphs
-
-    return StoredCVResponse(
-        filename=metadata["filename"],
-        paragraphs=paragraphs,
-        saved_at=metadata.get("saved_at"),
-    )
-
-
-@router.get("/cv/last/file")
-async def get_last_cv_file() -> FileResponse:
-    file_path = cv_storage_service.get_file_path()
-    metadata = cv_storage_service.load_metadata()
-    if not file_path or not metadata:
-        raise HTTPException(status_code=404, detail="No CV file in memory")
-
-    media_types = {
-        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        ".pdf": "application/pdf",
-    }
-    return FileResponse(
-        path=file_path,
-        filename=metadata["filename"],
-        media_type=media_types.get(file_path.suffix.lower(), "application/octet-stream"),
-    )
+@router.post("/application/cover-letter/docx", response_model=CoverLetterExportResponse)
+async def export_cover_letter(
+    request: Request,
+    payload: CoverLetterExportRequest,
+) -> CoverLetterExportResponse:
+    session_id = get_session_id(request)
+    try:
+        filename, download_url = export_cover_letter_docx(
+            session_id,
+            payload.cover_letter,
+            company_name=payload.company_name or "",
+            job_title=payload.job_title or "",
+        )
+        pdf_result = export_cover_letter_pdf(
+            session_id,
+            payload.cover_letter,
+            company_name=payload.company_name or "",
+            job_title=payload.job_title or "",
+        )
+        pdf_url = pdf_result[1] if pdf_result else None
+        return CoverLetterExportResponse(
+            filename=filename,
+            download_url=download_url,
+            download_url_pdf=pdf_url,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Cover letter export failed: {exc}") from exc
 
 
 @router.post("/application/kit", response_model=ApplicationKitResponse)
-async def generate_application_kit(payload: ApplicationKitRequest) -> ApplicationKitResponse:
+async def generate_application_kit(
+    request: Request,
+    payload: ApplicationKitRequest,
+) -> ApplicationKitResponse:
     if not settings.is_provider_configured(payload.llm_provider):
         raise HTTPException(status_code=400, detail=f"API key for '{payload.llm_provider}' is not configured")
 
+    session_id = get_session_id(request)
     try:
-        result = application_service.generate_kit(payload)
+        result = application_service.generate_kit(session_id, payload)
         return ApplicationKitResponse(**result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -124,11 +169,89 @@ async def generate_application_kit(payload: ApplicationKitRequest) -> Applicatio
         raise HTTPException(status_code=status_code, detail=message) from exc
 
 
-@router.post("/match", response_model=MatchScoreResponse)
-async def compute_match(payload: MatchScoreRequest) -> MatchScoreResponse:
+@router.post("/analyze", response_model=JobAnalysisResponse)
+async def analyze_job(request: Request, payload: JobAnalysisRequest) -> JobAnalysisResponse:
     if not settings.is_provider_configured(payload.llm_provider):
         raise HTTPException(status_code=400, detail=f"API key for '{payload.llm_provider}' is not configured")
 
+    session_id = get_session_id(request)
+    try:
+        if payload.paragraphs:
+            result = match_service.analyze_from_paragraphs(
+                job_description=payload.job_description,
+                paragraphs=payload.paragraphs,
+                output_language=payload.output_language,
+                llm_provider=payload.llm_provider,
+                llm_model=payload.llm_model,
+            )
+        else:
+            result = match_service.analyze_from_stored_cv(
+                session_id,
+                job_description=payload.job_description,
+                output_language=payload.output_language,
+                llm_provider=payload.llm_provider,
+                llm_model=payload.llm_model,
+            )
+        return JobAnalysisResponse(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        status_code = 400 if "API key" in message else 500
+        raise HTTPException(status_code=status_code, detail=message) from exc
+
+
+@router.post("/tailor/retry", response_model=RetryModificationsResponse)
+async def retry_tailor_modifications(
+    request: Request,
+    payload: RetryModificationsRequest,
+) -> RetryModificationsResponse:
+    if not settings.is_provider_configured(payload.llm_provider):
+        raise HTTPException(status_code=400, detail=f"API key for '{payload.llm_provider}' is not configured")
+
+    session_id = get_session_id(request)
+    try:
+        tailor_request = TailorRequest(
+            job_description=payload.job_description,
+            output_language=payload.output_language,
+            llm_provider=payload.llm_provider,
+            llm_model=payload.llm_model,
+            tailor_intensity=payload.tailor_intensity,
+        )
+        result = cv_tailor_service.retry_rejected(
+            session_id,
+            request=tailor_request,
+            rejected_block_ids=payload.rejected_block_ids,
+            kept_modifications=payload.kept_modifications,
+        )
+        return RetryModificationsResponse(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Retry failed: {exc}") from exc
+
+
+@router.post("/tailor/apply", response_model=ApplyModificationsResponse)
+async def apply_tailor_modifications(
+    request: Request,
+    payload: ApplyModificationsRequest,
+) -> ApplyModificationsResponse:
+    session_id = get_session_id(request)
+    try:
+        result = cv_tailor_service.apply_to_stored_cv(session_id, payload.modifications)
+        return ApplyModificationsResponse(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Apply failed: {exc}") from exc
+
+
+@router.post("/match", response_model=MatchScoreResponse)
+async def compute_match(request: Request, payload: MatchScoreRequest) -> MatchScoreResponse:
+    if not settings.is_provider_configured(payload.llm_provider):
+        raise HTTPException(status_code=400, detail=f"API key for '{payload.llm_provider}' is not configured")
+
+    session_id = get_session_id(request)
     try:
         if payload.paragraphs:
             result = match_service.score_from_paragraphs(
@@ -140,6 +263,7 @@ async def compute_match(payload: MatchScoreRequest) -> MatchScoreResponse:
             )
         else:
             result = match_service.score_from_stored_cv(
+                session_id,
                 job_description=payload.job_description,
                 output_language=payload.output_language,
                 llm_provider=payload.llm_provider,
@@ -155,30 +279,33 @@ async def compute_match(payload: MatchScoreRequest) -> MatchScoreResponse:
 
 
 @router.post("/preview", response_model=CVPreviewResponse)
-async def preview_cv(file: UploadFile = File(...)) -> CVPreviewResponse:
+async def preview_cv(request: Request, file: UploadFile = File(...)) -> CVPreviewResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
-    suffix = Path(file.filename).suffix.lower()
+    safe_name = _safe_upload_name(file.filename)
+    suffix = Path(safe_name).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Only .docx and .pdf files are supported")
 
+    session_id = get_session_id(request)
     preview_id = str(uuid.uuid4())
-    upload_path = settings.upload_path / f"{preview_id}{suffix}"
+    upload_path = settings.upload_path / f"{session_id}_{preview_id}{suffix}"
 
     try:
         with open(upload_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+        _enforce_upload_size(upload_path)
 
         result = cv_tailor_service.preview(
             file_path=upload_path,
-            original_filename=file.filename,
+            original_filename=safe_name,
         )
-        cv_storage_service.save(upload_path, file.filename, result["paragraphs"])
-        metadata = cv_storage_service.load_metadata()
+        cv_storage_service.save(session_id, upload_path, safe_name, result["paragraphs"])
+        metadata = cv_storage_service.load_metadata(session_id)
         paragraphs = metadata["paragraphs"] if metadata else result["paragraphs"]
         return CVPreviewResponse(
-            filename=file.filename,
+            filename=safe_name,
             paragraphs=paragraphs,
         )
     except ValueError as exc:
@@ -192,27 +319,23 @@ async def preview_cv(file: UploadFile = File(...)) -> CVPreviewResponse:
 
 @router.post("/tailor", response_model=TailorResponse)
 async def tailor_cv(
+    request: Request,
     job_description: str = Form(...),
     file: UploadFile | None = File(default=None),
     output_language: str = Form(default="fr"),
     llm_provider: str = Form(default="openai"),
     llm_model: str | None = Form(default=None),
+    tailor_intensity: str = Form(default="strong"),
     custom_system_prompt: str | None = Form(default=None),
     custom_user_prompt: str | None = Form(default=None),
 ) -> TailorResponse:
-    stored_path = cv_storage_service.get_file_path()
-    stored_meta = cv_storage_service.load_metadata()
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
 
-    if file and file.filename:
-        suffix = Path(file.filename).suffix.lower()
-        original_filename = file.filename
-        if suffix not in ALLOWED_EXTENSIONS:
-            raise HTTPException(status_code=400, detail="Only .docx and .pdf files are supported")
-    elif stored_path and stored_meta:
-        suffix = stored_path.suffix.lower()
-        original_filename = stored_meta["filename"]
-    else:
-        raise HTTPException(status_code=400, detail="No file provided and no CV in memory")
+    original_filename = _safe_upload_name(file.filename)
+    suffix = Path(original_filename).suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Only .docx and .pdf files are supported")
 
     if len(job_description.strip()) < 20:
         raise HTTPException(status_code=400, detail="Job description must be at least 20 characters")
@@ -223,26 +346,27 @@ async def tailor_cv(
     if llm_provider not in ("openai", "groq", "claude"):
         raise HTTPException(status_code=400, detail="LLM provider must be 'openai', 'groq', or 'claude'")
 
+    if tailor_intensity not in ("light", "strong", "ats"):
+        raise HTTPException(status_code=400, detail="Tailor intensity must be 'light', 'strong', or 'ats'")
+
     if not settings.is_provider_configured(llm_provider):
         raise HTTPException(status_code=400, detail=f"API key for '{llm_provider}' is not configured")
 
+    session_id = get_session_id(request)
     job_id = str(uuid.uuid4())
-    upload_path = settings.upload_path / f"{job_id}{suffix}"
-    copied_from_storage = False
+    upload_path = settings.upload_path / f"{session_id}_{job_id}{suffix}"
 
     try:
-        if file and file.filename:
-            with open(upload_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-        else:
-            shutil.copy2(stored_path, upload_path)
-            copied_from_storage = True
+        with open(upload_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        _enforce_upload_size(upload_path)
 
-        request = TailorRequest(
+        tailor_request = TailorRequest(
             job_description=job_description,
             output_language=output_language,
             llm_provider=llm_provider,
             llm_model=llm_model or None,
+            tailor_intensity=tailor_intensity,
             custom_system_prompt=custom_system_prompt or None,
             custom_user_prompt=custom_user_prompt or None,
         )
@@ -250,23 +374,12 @@ async def tailor_cv(
         result = cv_tailor_service.process(
             file_path=upload_path,
             original_filename=original_filename,
-            request=request,
+            request=tailor_request,
         )
 
-        try:
-            match = match_service.score_from_paragraphs(
-                job_description=job_description,
-                paragraphs=result["original_paragraphs"],
-                output_language=output_language,
-                llm_provider=llm_provider,
-                llm_model=llm_model,
-            )
-            result["match_score"] = match["score"]
-        except Exception:
-            result["match_score"] = None
+        result["match_score"] = None
 
-        if not copied_from_storage or (file and file.filename):
-            cv_storage_service.save(upload_path, original_filename, result["original_paragraphs"])
+        cv_storage_service.save(session_id, upload_path, original_filename, result["original_paragraphs"])
 
         return TailorResponse(**result)
     except ValueError as exc:
@@ -281,12 +394,9 @@ async def tailor_cv(
 
 
 @router.get("/download/{filename}")
-async def download_file(filename: str) -> FileResponse:
-    safe_name = Path(filename).name
-    file_path = settings.output_path / safe_name
-
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
+async def download_file(request: Request, filename: str) -> FileResponse:
+    session_id = get_session_id(request)
+    file_path = _resolve_session_download(session_id, filename)
 
     media_types = {
         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -296,6 +406,6 @@ async def download_file(filename: str) -> FileResponse:
 
     return FileResponse(
         path=file_path,
-        filename=safe_name,
+        filename=file_path.name,
         media_type=media_types.get(suffix, "application/octet-stream"),
     )

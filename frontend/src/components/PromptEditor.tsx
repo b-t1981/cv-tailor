@@ -75,16 +75,16 @@ export function PromptEditor({
 
       {isOpen && (
         <div className="mt-4 border-t border-slate-100 pt-4">
-          <div className="mb-4 flex flex-wrap justify-end gap-2">
-            <button type="button" onClick={handleReset} className="btn-secondary">
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <button type="button" onClick={handleReset} className="btn-secondary w-full sm:w-auto">
               {t("resetPrompts")}
             </button>
-            <button type="button" onClick={handleSave} disabled={saving} className="btn-primary">
+            <button type="button" onClick={handleSave} disabled={saving} className="btn-primary w-full sm:w-auto">
               {t("savePrompts")}
             </button>
           </div>
 
-          <div className="mb-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <div className="mb-4 break-words rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
             <span className="font-medium">{t("variables")}:</span>{" "}
             <code className="text-brand-700">{"{job_description}"}</code>,{" "}
             <code className="text-brand-700">{"{cv_paragraphs}"}</code>,{" "}

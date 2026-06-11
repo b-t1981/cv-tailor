@@ -79,10 +79,6 @@ try {
 try {
     $health = Invoke-RestMethod -Uri "http://127.0.0.1:8001/api/health" -TimeoutSec 5
     $beOk = $health.status -eq "ok"
-    $cvMeta = Invoke-RestMethod -Uri "http://127.0.0.1:8001/api/cv/last" -TimeoutSec 5
-    if ($cvMeta.paragraphs.Count -lt 5) {
-        Write-Host "Attention: extraction CV partielle ($($cvMeta.paragraphs.Count) lignes). Re-uploadez le CV." -ForegroundColor Yellow
-    }
 } catch { }
 
 Write-Host ""

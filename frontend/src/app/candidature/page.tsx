@@ -4,10 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { CopyButton } from "@/components/CopyButton";
 import { LLMSelector, type LLMProviderId } from "@/components/LLMSelector";
+import { PrivacyNotice } from "@/components/PrivacyNotice";
+import { loadAdaptedCv } from "@/lib/history";
 import { useI18n } from "@/i18n/context";
 import {
-  fetchLastCV,
+  exportCoverLetterDocx,
   generateApplicationKit,
+  getDownloadUrl,
   type ApplicationKitResult,
   type CVParagraph,
 } from "@/lib/api";
@@ -30,22 +33,20 @@ export default function ApplicationPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ApplicationKitResult | null>(null);
+  const [exportingCoverLetter, setExportingCoverLetter] = useState(false);
+  const [usingAdaptedCv, setUsingAdaptedCv] = useState(false);
+  const [coverLetterPdfUrl, setCoverLetterPdfUrl] = useState<string | null>(null);
 
   useEffect(() => {
     const saved = sessionStorage.getItem(JOB_STORAGE_KEY);
-    if (saved) {
-      setJobDescription(saved);
-    }
+    if (saved) setJobDescription(saved);
 
-    fetchLastCV()
-      .then((cv) => {
-        setCvParagraphs(cv.paragraphs);
-        setCvFilename(cv.filename);
-      })
-      .catch(() => {
-        setCvParagraphs([]);
-        setCvFilename("");
-      });
+    const adapted = loadAdaptedCv();
+    if (adapted) {
+      setCvParagraphs(adapted.paragraphs);
+      setCvFilename(adapted.filename);
+      setUsingAdaptedCv(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -95,19 +96,43 @@ export default function ApplicationPage() {
   const canSubmit =
     hasLlmConfigured && cvParagraphs.length > 0 && jobDescription.trim().length >= 20 && !loading;
 
+  const handleExportCoverLetter = async () => {
+    if (!result?.cover_letter) return;
+
+    setExportingCoverLetter(true);
+    setError(null);
+    try {
+      const exported = await exportCoverLetterDocx({
+        coverLetter: result.cover_letter,
+        companyName: companyName || undefined,
+        jobTitle: jobTitle || undefined,
+      });
+      setCoverLetterPdfUrl(exported.download_url_pdf ?? null);
+      const link = document.createElement("a");
+      link.href = getDownloadUrl(exported.download_url);
+      link.download = exported.filename;
+      link.click();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("error"));
+    } finally {
+      setExportingCoverLetter(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-brand-50 to-slate-100">
       <AppHeader active="application" />
 
-      <main className="mx-auto max-w-7xl space-y-6 px-4 py-8">
+      <main className="page-main">
+        <PrivacyNotice />
         <div className="card">
           <h2 className="mb-1 text-lg font-semibold text-slate-900">{t("applicationFormTitle")}</h2>
           <p className="mb-4 text-sm text-slate-500">{t("applicationFormHint")}</p>
 
           {cvParagraphs.length > 0 ? (
             <p className="mb-4 rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-800">
-              {t("applicationCvLoaded")}: <strong>{cvFilename}</strong> ({cvParagraphs.length}{" "}
-              {t("compareLines")})
+              {usingAdaptedCv ? t("applicationAdaptedCv") : t("applicationCvLoaded")}:{" "}
+              <strong>{cvFilename}</strong> ({cvParagraphs.length} {t("compareLines")})
             </p>
           ) : (
             <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -154,7 +179,7 @@ export default function ApplicationPage() {
             </div>
             <div>
               <label className="label">{t("applicationTone")}</label>
-              <div className="flex gap-3 pt-2">
+              <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:gap-3">
                 <label className="flex cursor-pointer items-center gap-2 text-sm">
                   <input
                     type="radio"
@@ -193,8 +218,8 @@ export default function ApplicationPage() {
 
           <div className="mt-4">
             <label className="label">{t("outputLang")}</label>
-            <div className="flex gap-3">
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
+              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm sm:min-h-0">
                 <input
                   type="radio"
                   checked={outputLanguage === "fr"}
@@ -203,7 +228,7 @@ export default function ApplicationPage() {
                 />
                 {t("french")}
               </label>
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm sm:min-h-0">
                 <input
                   type="radio"
                   checked={outputLanguage === "en"}
@@ -227,12 +252,18 @@ export default function ApplicationPage() {
           />
         </div>
 
-        <div className="flex justify-center">
+        <div
+          className={
+            result
+              ? "flex justify-center"
+              : "sticky bottom-0 z-40 -mx-3 border-t border-slate-200/80 bg-gradient-to-t from-slate-100 via-slate-100/95 to-transparent px-3 py-3 safe-bottom sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0"
+          }
+        >
           <button
             type="button"
             onClick={handleGenerate}
             disabled={!canSubmit}
-            className="btn-primary px-8 py-3 text-base"
+            className="btn-primary w-full py-3.5 text-base sm:mx-auto sm:block sm:w-auto sm:max-w-md sm:px-8"
           >
             {loading ? t("applicationGenerating") : t("applicationGenerateBtn")}
           </button>
@@ -253,39 +284,58 @@ export default function ApplicationPage() {
             )}
 
             <section className="card">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-lg font-semibold text-slate-900">{t("applicationCoverLetter")}</h3>
-                <CopyButton text={result.cover_letter} />
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <h3 className="text-base font-semibold text-slate-900 sm:text-lg">{t("applicationCoverLetter")}</h3>
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleExportCoverLetter}
+                    disabled={exportingCoverLetter}
+                    className="btn-primary w-full px-3 py-2 text-xs sm:w-auto sm:py-1"
+                  >
+                    {exportingCoverLetter ? t("applicationExportingCoverLetter") : t("applicationDownloadCoverLetter")}
+                  </button>
+                  {coverLetterPdfUrl && (
+                    <a
+                      href={getDownloadUrl(coverLetterPdfUrl)}
+                      download
+                      className="btn-secondary w-full px-3 py-2 text-center text-xs sm:w-auto sm:py-1"
+                    >
+                      {t("applicationDownloadCoverLetterPdf")}
+                    </a>
+                  )}
+                  <CopyButton text={result.cover_letter} />
+                </div>
               </div>
-              <pre className="whitespace-pre-wrap rounded-lg bg-slate-50 p-4 text-sm leading-relaxed text-slate-800">
+              <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-800 sm:p-4">
                 {result.cover_letter}
               </pre>
             </section>
 
             <section className="card">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-lg font-semibold text-slate-900">{t("applicationEmailSubject")}</h3>
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="text-base font-semibold text-slate-900 sm:text-lg">{t("applicationEmailSubject")}</h3>
                 <CopyButton text={result.email_subject} />
               </div>
               <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-800">{result.email_subject}</p>
             </section>
 
             <section className="card">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-lg font-semibold text-slate-900">{t("applicationRecruiterMessage")}</h3>
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="text-base font-semibold text-slate-900 sm:text-lg">{t("applicationRecruiterMessage")}</h3>
                 <CopyButton text={result.recruiter_message} />
               </div>
-              <pre className="whitespace-pre-wrap rounded-lg bg-slate-50 p-4 text-sm leading-relaxed text-slate-800">
+              <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-800 sm:p-4">
                 {result.recruiter_message}
               </pre>
             </section>
 
             <section className="card">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-lg font-semibold text-slate-900">{t("applicationLinkedinMessage")}</h3>
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="text-base font-semibold text-slate-900 sm:text-lg">{t("applicationLinkedinMessage")}</h3>
                 <CopyButton text={result.linkedin_message} />
               </div>
-              <pre className="whitespace-pre-wrap rounded-lg bg-slate-50 p-4 text-sm leading-relaxed text-slate-800">
+              <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-800 sm:p-4">
                 {result.linkedin_message}
               </pre>
               <p className="mt-2 text-xs text-slate-500">

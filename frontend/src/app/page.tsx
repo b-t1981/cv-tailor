@@ -1,25 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
+import { ApplicationHistoryPanel } from "@/components/ApplicationHistoryPanel";
 import { CVCompareView } from "@/components/CVCompareView";
 import { FileUpload } from "@/components/FileUpload";
+import { JobAnalysisPanel } from "@/components/JobAnalysisPanel";
 import { LLMSelector, type LLMProviderId } from "@/components/LLMSelector";
-import { MatchScorePanel } from "@/components/MatchScorePanel";
+import { ModificationReviewPanel } from "@/components/ModificationReviewPanel";
+import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { PromptEditor } from "@/components/PromptEditor";
 import { ResultPanel } from "@/components/ResultPanel";
 import { useI18n } from "@/i18n/context";
 import {
-  computeMatchScore,
-  fetchLastCVFile,
+  analyzeJob,
   fetchPrompts,
   previewCV,
   tailorCV,
   type CVParagraph,
-  type MatchScoreResult,
+  type JobAnalysisResult,
   type PromptConfig,
+  type TailorIntensity,
   type TailorResult,
 } from "@/lib/api";
+import { saveAdaptedCv, saveHistoryEntry } from "@/lib/history";
 
 const JOB_STORAGE_KEY = "cv-tailor-job-description";
 
@@ -30,10 +34,7 @@ export default function HomePage() {
   const [outputLanguage, setOutputLanguage] = useState<"fr" | "en">("fr");
   const [llmProvider, setLlmProvider] = useState<LLMProviderId>("groq");
   const [llmModel, setLlmModel] = useState("llama-3.3-70b-versatile");
-  const [prompts, setPrompts] = useState<PromptConfig>({
-    system_prompt: "",
-    user_prompt: "",
-  });
+  const [prompts, setPrompts] = useState<PromptConfig>({ system_prompt: "", user_prompt: "" });
   const [loading, setLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,120 +42,172 @@ export default function HomePage() {
   const [originalParagraphs, setOriginalParagraphs] = useState<CVParagraph[]>([]);
   const [previewFilename, setPreviewFilename] = useState<string>("");
   const [hasLlmConfigured, setHasLlmConfigured] = useState(true);
-  const [cvRestored, setCvRestored] = useState(false);
-  const [matchScore, setMatchScore] = useState<MatchScoreResult | null>(null);
-  const [matchLoading, setMatchLoading] = useState(false);
-  const [matchError, setMatchError] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<JobAnalysisResult | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [tailorIntensity, setTailorIntensity] = useState<TailorIntensity>("strong");
+  const [acceptedModifications, setAcceptedModifications] = useState<Record<string, string>>({});
+  const [exportUrls, setExportUrls] = useState<{
+    downloadUrl: string;
+    downloadUrlPdf?: string | null;
+  } | null>(null);
+  const [scoreBefore, setScoreBefore] = useState<number | null>(null);
+  const [scoreAfter, setScoreAfter] = useState<number | null>(null);
+  const [showAdvancedLlm, setShowAdvancedLlm] = useState(false);
+  const [invalidFileError, setInvalidFileError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchPrompts()
-      .then(setPrompts)
-      .catch(() => setError(t("error")));
+    fetchPrompts().then(setPrompts).catch(() => setError(t("error")));
   }, [t]);
 
   useEffect(() => {
     const saved = sessionStorage.getItem(JOB_STORAGE_KEY);
-    if (saved) {
-      setJobDescription(saved);
-    }
+    if (saved) setJobDescription(saved);
   }, []);
 
   useEffect(() => {
-    if (jobDescription.trim()) {
-      sessionStorage.setItem(JOB_STORAGE_KEY, jobDescription);
-    }
+    if (jobDescription.trim()) sessionStorage.setItem(JOB_STORAGE_KEY, jobDescription);
   }, [jobDescription]);
 
-  const loadCvPreview = useCallback(
-    async (selected: File, filename?: string) => {
-      const preview = await previewCV(selected);
-      setOriginalParagraphs(preview.paragraphs);
-      setPreviewFilename(filename ?? preview.filename);
-      if (preview.paragraphs.length > 0) {
-        setTimeout(() => {
-          document.getElementById("cv-compare-section")?.scrollIntoView({ behavior: "smooth" });
-        }, 200);
-      }
-      return preview;
-    },
-    [],
-  );
+  useEffect(() => {
+    setAnalysis(null);
+    setAnalysisError(null);
+    setScoreBefore(null);
+    setScoreAfter(null);
+  }, [jobDescription, originalParagraphs]);
 
-  const restoreLastCV = useCallback(async () => {
-    setPreviewLoading(true);
+  useEffect(() => {
+    if (result?.modified_paragraphs) {
+      setAcceptedModifications(result.modified_paragraphs);
+      setExportUrls(null);
+    }
+  }, [result]);
+
+  const loadCvPreview = useCallback(async (selected: File, filename?: string) => {
+    const preview = await previewCV(selected);
+    setOriginalParagraphs(preview.paragraphs);
+    setPreviewFilename(filename ?? preview.filename);
+    if (preview.paragraphs.length > 0) {
+      setTimeout(() => {
+        document.getElementById("cv-compare-section")?.scrollIntoView({ behavior: "smooth" });
+      }, 200);
+    }
+    return preview;
+  }, []);
+
+  const handleAnalyze = useCallback(async () => {
+    if (originalParagraphs.length === 0 || jobDescription.trim().length < 20) return;
+    setAnalysisLoading(true);
+    setAnalysisError(null);
     try {
-      const restoredFile = await fetchLastCVFile();
-      setFile(restoredFile);
-      await loadCvPreview(restoredFile, restoredFile.name);
-      setCvRestored(true);
+      const data = await analyzeJob({
+        jobDescription,
+        outputLanguage,
+        llmProvider,
+        llmModel,
+        paragraphs: originalParagraphs,
+      });
+      setAnalysis(data);
+      setScoreBefore(data.score);
+      setScoreAfter(null);
     } catch (err) {
-      setCvRestored(false);
-      const message = err instanceof Error ? err.message : t("error");
-      if (!message.toLowerCase().includes("no cv")) {
-        setError(message);
-      }
+      setAnalysis(null);
+      setAnalysisError(err instanceof Error ? err.message : t("error"));
     } finally {
-      setPreviewLoading(false);
+      setAnalysisLoading(false);
     }
-  }, [loadCvPreview, t]);
+  }, [jobDescription, outputLanguage, llmProvider, llmModel, originalParagraphs, t]);
 
-  useEffect(() => {
-    restoreLastCV();
-  }, [restoreLastCV]);
+  const handleAcceptedChange = useCallback((accepted: Record<string, string>) => {
+    setAcceptedModifications(accepted);
+    setExportUrls(null);
+  }, []);
 
-  useEffect(() => {
-    if (!hasLlmConfigured || originalParagraphs.length === 0 || jobDescription.trim().length < 20) {
-      setMatchScore(null);
-      setMatchError(null);
-      return;
-    }
+  const displayTailoredParagraphs = useMemo(() => {
+    if (!result) return null;
+    return result.original_paragraphs.map((paragraph) => {
+      const newText = acceptedModifications[paragraph.id];
+      if (newText) return { ...paragraph, text: newText, modified: true };
+      return paragraph;
+    });
+  }, [result, acceptedModifications]);
 
-    const timer = setTimeout(async () => {
-      setMatchLoading(true);
-      setMatchError(null);
+  const handleExportReady = useCallback(
+    async (urls: { downloadUrl: string; downloadUrlPdf?: string | null }) => {
+      setExportUrls(urls);
+      if (!result || !displayTailoredParagraphs) return;
+
+      const fname = previewFilename || file?.name || "cv.docx";
+      saveAdaptedCv(displayTailoredParagraphs, fname);
+      saveHistoryEntry({
+        id: result.job_id,
+        date: new Date().toISOString(),
+        jobTitleSnippet: jobDescription.slice(0, 60) + (jobDescription.length > 60 ? "…" : ""),
+        scoreBefore,
+        scoreAfter: null,
+        modificationsCount: Object.keys(acceptedModifications).length,
+        downloadUrl: urls.downloadUrl,
+        tailoredParagraphs: displayTailoredParagraphs,
+      });
+
       try {
-        const score = await computeMatchScore({
+        const after = await analyzeJob({
           jobDescription,
           outputLanguage,
           llmProvider,
           llmModel,
-          paragraphs: originalParagraphs,
+          paragraphs: displayTailoredParagraphs,
         });
-        setMatchScore(score);
-      } catch (err) {
-        setMatchScore(null);
-        setMatchError(err instanceof Error ? err.message : t("error"));
-      } finally {
-        setMatchLoading(false);
+        setScoreAfter(after.score);
+        setAnalysis(after);
+      } catch {
+        /* optional */
       }
-    }, 1000);
+    },
+    [
+      result,
+      displayTailoredParagraphs,
+      previewFilename,
+      file,
+      jobDescription,
+      scoreBefore,
+      acceptedModifications,
+      outputLanguage,
+      llmProvider,
+      llmModel,
+    ],
+  );
 
-    return () => clearTimeout(timer);
-  }, [
-    jobDescription,
-    originalParagraphs,
-    outputLanguage,
-    llmProvider,
-    llmModel,
-    hasLlmConfigured,
-    t,
-  ]);
+  const handleModificationsUpdate = useCallback(
+    (mods: Record<string, string>, tailored: CVParagraph[]) => {
+      setResult((current) =>
+        current
+          ? {
+              ...current,
+              modified_paragraphs: mods,
+              tailored_paragraphs: tailored,
+              modifications_count: Object.keys(mods).length,
+            }
+          : current,
+      );
+      setAcceptedModifications(mods);
+      setExportUrls(null);
+    },
+    [],
+  );
 
   const handleFileSelect = async (selected: File | null) => {
     setFile(selected);
     setResult(null);
-    setMatchScore(null);
-    setCvRestored(false);
-
+    setAnalysis(null);
+    setInvalidFileError(null);
     if (!selected) {
       setOriginalParagraphs([]);
       setPreviewFilename("");
       return;
     }
-
     setPreviewLoading(true);
     setError(null);
-
     try {
       await loadCvPreview(selected);
     } catch (err) {
@@ -167,12 +220,11 @@ export default function HomePage() {
   };
 
   const handleTailor = async () => {
-    if ((!file && originalParagraphs.length === 0) || jobDescription.trim().length < 20) return;
-
+    if (!file || jobDescription.trim().length < 20) return;
     setLoading(true);
     setError(null);
     setResult(null);
-
+    setExportUrls(null);
     try {
       const response = await tailorCV({
         file,
@@ -180,25 +232,13 @@ export default function HomePage() {
         outputLanguage,
         llmProvider,
         llmModel,
+        tailorIntensity,
         customSystemPrompt: prompts.system_prompt,
         customUserPrompt: prompts.user_prompt,
       });
       setResult(response);
-      if (response.match_score != null) {
-        setMatchScore((current) =>
-          current?.score === response.match_score
-            ? current
-            : {
-                score: response.match_score!,
-                summary: response.summary,
-                strengths: current?.strengths ?? [],
-                gaps: current?.gaps ?? [],
-              },
-        );
-      }
-
       setTimeout(() => {
-        document.getElementById("cv-compare-section")?.scrollIntoView({ behavior: "smooth" });
+        document.getElementById("modification-review")?.scrollIntoView({ behavior: "smooth" });
       }, 200);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("error"));
@@ -207,74 +247,126 @@ export default function HomePage() {
     }
   };
 
-  const hasCv = Boolean(file) || originalParagraphs.length > 0;
+  const hasCv = Boolean(file) && originalParagraphs.length > 0;
   const canSubmit = hasCv && jobDescription.trim().length >= 20 && !loading && hasLlmConfigured;
+  const canAnalyze = hasCv && jobDescription.trim().length >= 20 && hasLlmConfigured && !analysisLoading;
   const compareOriginal = result?.original_paragraphs ?? originalParagraphs;
+  const acceptedCount = Object.keys(acceptedModifications).length;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-brand-50 to-slate-100">
       <AppHeader active="cv" />
-
-      <main className="mx-auto max-w-7xl space-y-6 px-4 py-8">
-        <FileUpload file={file} restored={cvRestored} onFileSelect={handleFileSelect} />
+      <main className="page-main">
+        <PrivacyNotice />
+        <FileUpload
+          file={file}
+          onFileSelect={handleFileSelect}
+          onInvalidFile={() => setInvalidFileError(t("uploadInvalidType"))}
+        />
+        {invalidFileError && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {invalidFileError}
+          </div>
+        )}
+        {previewLoading && (
+          <div className="card text-center text-sm text-slate-500">{t("previewLoading")}</div>
+        )}
 
         <div className="card">
           <h2 className="mb-1 text-lg font-semibold text-slate-900">{t("jobTitle")}</h2>
           <textarea
             value={jobDescription}
-            onChange={(event) => setJobDescription(event.target.value)}
+            onChange={(e) => setJobDescription(e.target.value)}
             placeholder={t("jobPlaceholder")}
             rows={8}
             className="input-field"
           />
-
           <div className="mt-4">
-            <MatchScorePanel
-              match={matchScore}
-              loading={matchLoading}
+            <JobAnalysisPanel
+              analysis={analysis}
+              loading={analysisLoading}
+              canAnalyze={canAnalyze}
               waitingForCv={originalParagraphs.length === 0}
               waitingForJob={originalParagraphs.length > 0 && jobDescription.trim().length < 20}
-              error={matchError}
+              error={analysisError}
+              scoreBefore={scoreBefore}
+              scoreAfter={scoreAfter}
+              onAnalyze={handleAnalyze}
             />
           </div>
 
           <div className="mt-4">
+            <label className="label">{t("tailorIntensity")}</label>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {(["light", "strong", "ats"] as const).map((mode) => (
+                <label
+                  key={mode}
+                  className={`flex cursor-pointer flex-col rounded-lg border px-3 py-2.5 text-sm transition ${
+                    tailorIntensity === mode
+                      ? "border-brand-500 bg-brand-50"
+                      : "border-slate-300 hover:border-brand-300"
+                  }`}
+                >
+                  <span className="flex items-center gap-2 font-medium text-slate-800">
+                    <input
+                      type="radio"
+                      name="tailorIntensity"
+                      checked={tailorIntensity === mode}
+                      onChange={() => setTailorIntensity(mode)}
+                      className="text-brand-600"
+                    />
+                    {t(
+                      mode === "light"
+                        ? "tailorIntensityLight"
+                        : mode === "ats"
+                          ? "tailorIntensityAts"
+                          : "tailorIntensityStrong",
+                    )}
+                  </span>
+                  <span className="mt-1 pl-6 text-xs text-slate-500">
+                    {t(
+                      mode === "light"
+                        ? "tailorIntensityLightHint"
+                        : mode === "ats"
+                          ? "tailorIntensityAtsHint"
+                          : "tailorIntensityStrongHint",
+                    )}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4">
             <label className="label">{t("outputLang")}</label>
-            <div className="flex gap-3">
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="outputLang"
-                  checked={outputLanguage === "fr"}
-                  onChange={() => setOutputLanguage("fr")}
-                  className="text-brand-600"
-                />
+            <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
+              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm sm:min-h-0">
+                <input type="radio" checked={outputLanguage === "fr"} onChange={() => setOutputLanguage("fr")} className="text-brand-600" />
                 {t("french")}
               </label>
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="outputLang"
-                  checked={outputLanguage === "en"}
-                  onChange={() => setOutputLanguage("en")}
-                  className="text-brand-600"
-                />
+              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm sm:min-h-0">
+                <input type="radio" checked={outputLanguage === "en"} onChange={() => setOutputLanguage("en")} className="text-brand-600" />
                 {t("english")}
               </label>
             </div>
           </div>
 
+          <div className="mt-4">
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
+              <input type="checkbox" checked={showAdvancedLlm} onChange={(e) => setShowAdvancedLlm(e.target.checked)} />
+              {t("advancedLlm")}
+            </label>
+          </div>
           <LLMSelector
-            hidden
+            hidden={!showAdvancedLlm}
             provider={llmProvider}
             model={llmModel}
-            onChange={(nextProvider, nextModel) => {
-              setLlmProvider(nextProvider);
-              setLlmModel(nextModel);
+            onChange={(p, m) => {
+              setLlmProvider(p);
+              setLlmModel(m);
             }}
             onConfiguredChange={setHasLlmConfigured}
           />
-
           {!hasLlmConfigured && (
             <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
               {t("noLlmConfigured")}
@@ -282,46 +374,63 @@ export default function HomePage() {
           )}
         </div>
 
-        <PromptEditor
-          systemPrompt={prompts.system_prompt}
-          userPrompt={prompts.user_prompt}
-          onChange={setPrompts}
-          defaultOpen={false}
-        />
+        <PromptEditor systemPrompt={prompts.system_prompt} userPrompt={prompts.user_prompt} onChange={setPrompts} defaultOpen={false} />
 
-        <div className="flex justify-center">
+        <div
+          className={
+            result
+              ? "flex justify-center"
+              : "sticky bottom-0 z-40 -mx-3 border-t border-slate-200/80 bg-gradient-to-t from-slate-100 via-slate-100/95 to-transparent px-3 py-3 safe-bottom sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0"
+          }
+        >
           <button
             type="button"
             onClick={handleTailor}
             disabled={!canSubmit}
-            className="btn-primary px-8 py-3 text-base"
+            className="btn-primary w-full py-3.5 text-base sm:mx-auto sm:block sm:w-auto sm:max-w-md sm:px-8"
           >
             {loading ? t("processing") : t("tailorBtn")}
           </button>
         </div>
 
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
         )}
 
-        <ResultPanel result={result} matchScore={matchScore?.score ?? result?.match_score} />
+        <ResultPanel result={result} acceptedCount={result ? acceptedCount : undefined} />
+
+        {result && (
+          <div id="modification-review">
+            <ModificationReviewPanel
+              originalParagraphs={compareOriginal}
+              proposedModifications={result.modified_paragraphs}
+              jobDescription={jobDescription}
+              outputLanguage={outputLanguage}
+              llmProvider={llmProvider}
+              llmModel={llmModel}
+              tailorIntensity={tailorIntensity}
+              onAcceptedChange={handleAcceptedChange}
+              onExportReady={handleExportReady}
+              onModificationsUpdate={handleModificationsUpdate}
+            />
+          </div>
+        )}
 
         <div id="cv-compare-section">
           {hasCv && !previewLoading && (
             <CVCompareView
-              hidden
               originalParagraphs={compareOriginal}
-              tailoredParagraphs={result?.tailored_paragraphs ?? null}
+              tailoredParagraphs={displayTailoredParagraphs}
               filename={previewFilename || file?.name}
-              downloadUrl={result?.download_url}
-              downloadUrlPdf={result?.download_url_pdf}
-              modificationsCount={result?.modifications_count}
+              downloadUrl={exportUrls?.downloadUrl ?? null}
+              downloadUrlPdf={exportUrls?.downloadUrlPdf ?? null}
+              modificationsCount={acceptedCount}
               summary={result?.summary}
             />
           )}
         </div>
+
+        <ApplicationHistoryPanel />
       </main>
     </div>
   );

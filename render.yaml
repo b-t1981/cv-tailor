@@ -1,0 +1,40 @@
+# Backend API — à déployer sur Render (ou Railway/Fly) en complément du frontend Vercel.
+# https://render.com/docs/infrastructure-as-code
+
+services:
+  - type: web
+    name: cv-tailor-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DEFAULT_LLM_PROVIDER
+        value: groq
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: PDF_USE_WORD
+        value: "false"
+      - key: MAX_UPLOAD_BYTES
+        value: "10485760"
+      - key: OUTPUT_TTL_HOURS
+        value: "48"
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "60"
+      - key: ALLOW_PROMPT_WRITES
+        value: "false"
+      - key: ADMIN_API_TOKEN
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAMESITE
+        value: "none"

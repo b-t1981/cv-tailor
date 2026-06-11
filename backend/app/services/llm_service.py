@@ -62,6 +62,7 @@ class LLMService:
         output_language: str,
         provider: LLMProvider | None = None,
         model: str | None = None,
+        temperature: float = 0.35,
     ) -> tuple[dict[str, str], str]:
         selected_provider = provider or settings.default_llm_provider
         selected_model = model or settings.default_model_for(selected_provider)
@@ -82,13 +83,14 @@ class LLMService:
 
         try:
             if selected_provider == "claude":
-                content = self._call_claude(system_prompt, user_prompt, selected_model)
+                content = self._call_claude(system_prompt, user_prompt, selected_model, temperature=temperature)
             else:
                 content = self._call_openai_compatible(
                     provider=selected_provider,
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     model=selected_model,
+                    temperature=temperature,
                 )
         except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
             if getattr(exc, "status_code", None) == 401 or "invalid" in str(exc).lower():
@@ -154,6 +156,66 @@ class LLMService:
             raise ValueError(f"{PROVIDER_LABELS[selected_provider]} request failed: {exc}") from exc
 
         return self._parse_match_response(content)
+
+    def analyze_job_fit(
+        self,
+        job_description: str,
+        cv_paragraphs: str,
+        output_language: str = "fr",
+        provider: LLMProvider | None = None,
+        model: str | None = None,
+    ) -> dict:
+        selected_provider = provider or settings.default_llm_provider
+        selected_model = model or settings.default_model_for(selected_provider)
+
+        if not settings.is_provider_configured(selected_provider):
+            raise ValueError(f"{PROVIDER_LABELS[selected_provider]} API key is not configured")
+
+        language_label = "French" if output_language == "fr" else "English"
+        system_prompt = (
+            "You are an expert recruiter and ATS analyst. Evaluate CV vs job description.\n"
+            "Read the ENTIRE CV before answering.\n\n"
+            "RULES:\n"
+            "- score: 0-100 realistic match\n"
+            "- strengths: CV elements aligned with the job\n"
+            "- gaps: genuine missing requirements only\n"
+            "- present_keywords: important job keywords/skills/tools ALREADY in the CV (max 12)\n"
+            "- missing_keywords: important job keywords/skills/tools NOT in the CV (max 12)\n"
+            "- keyword_suggestions: actionable tips to address missing keywords HONESTLY "
+            "(e.g. mention a related project if in CV, or develop the skill — max 6)\n"
+            "- Only list concrete skills, tools, technologies, certifications, or domain terms\n"
+            "- Do NOT invent CV content\n\n"
+            "Respond ONLY with valid JSON:\n"
+            '{"score": 72, "summary": "...", "strengths": ["..."], "gaps": ["..."], '
+            '"present_keywords": ["..."], "missing_keywords": ["..."], '
+            '"keyword_suggestions": ["..."]}'
+        )
+        user_prompt = (
+            f"Language for all text fields: {language_label}\n\n"
+            f"## Job Description\n{job_description}\n\n"
+            f"## CV Content\n{cv_paragraphs}\n\n"
+            "Analyze match score and keyword coverage."
+        )
+
+        try:
+            if selected_provider == "claude":
+                content = self._call_claude(system_prompt, user_prompt, selected_model)
+            else:
+                content = self._call_openai_compatible(
+                    provider=selected_provider,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    model=selected_model,
+                )
+        except (AuthenticationError, AnthropicAuthError, APIStatusError) as exc:
+            if getattr(exc, "status_code", None) == 401 or "invalid" in str(exc).lower():
+                raise ValueError(
+                    f"{PROVIDER_LABELS[selected_provider]} API key is invalid. "
+                    f"Check {selected_provider.upper()}_API_KEY in backend/.env"
+                ) from exc
+            raise ValueError(f"{PROVIDER_LABELS[selected_provider]} request failed: {exc}") from exc
+
+        return self._parse_analysis_response(content)
 
     def generate_application_kit(
         self,
@@ -306,6 +368,30 @@ class LLMService:
 
         cleaned = {str(key): str(value) for key, value in modifications.items() if value}
         return cleaned, summary
+
+    @staticmethod
+    def _parse_analysis_response(content: str) -> dict:
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", content, re.DOTALL)
+            if not match:
+                raise ValueError("LLM returned invalid JSON") from None
+            data = json.loads(match.group())
+
+        score = int(data.get("score", 0))
+        score = max(0, min(100, score))
+        return {
+            "score": score,
+            "summary": str(data.get("summary", "")),
+            "strengths": [str(item) for item in data.get("strengths", []) if item],
+            "gaps": [str(item) for item in data.get("gaps", []) if item],
+            "present_keywords": [str(item) for item in data.get("present_keywords", []) if item],
+            "missing_keywords": [str(item) for item in data.get("missing_keywords", []) if item],
+            "keyword_suggestions": [
+                str(item) for item in data.get("keyword_suggestions", []) if item
+            ],
+        }
 
     @staticmethod
     def _parse_match_response(content: str) -> dict:

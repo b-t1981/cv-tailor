@@ -1,3 +1,4 @@
+import secrets
 from pathlib import Path
 from typing import Literal
 
@@ -23,6 +24,14 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     # docx2pdf ouvre Microsoft Word (dialogue imprimante sur Windows) — désactivé par défaut
     pdf_use_word: bool = False
+    max_upload_bytes: int = 10 * 1024 * 1024
+    output_ttl_hours: int = 48
+    rate_limit_per_minute: int = 60
+    session_ttl_hours: int = 168
+    cookie_secure: bool = False
+    cookie_samesite: str = "lax"
+    allow_prompt_writes: bool = False
+    admin_api_token: str = ""
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -50,6 +59,22 @@ class Settings(BaseSettings):
         path = self.base_dir / self.output_dir
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def session_storage_path(self, session_id: str) -> Path:
+        path = self.base_dir / self.stored_cv_dir / session_id
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def session_output_path(self, session_id: str) -> Path:
+        path = self.output_path / session_id
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def is_admin_token_valid(self, token: str | None) -> bool:
+        expected = self.admin_api_token.strip()
+        if not expected:
+            return False
+        return bool(token and secrets.compare_digest(token, expected))
 
     @staticmethod
     def _is_valid_api_key(key: str) -> bool:

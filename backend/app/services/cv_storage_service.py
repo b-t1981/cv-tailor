@@ -6,24 +6,31 @@ from pathlib import Path
 from app.config import settings
 from app.models.schemas import ParagraphInfo
 from app.services.cv_extractor import extract_cv_paragraphs
+from app.session import is_valid_session_id
 
 METADATA_FILE = "metadata.json"
 CV_BASENAME = "last_cv"
 
 
 class CVStorageService:
-    @property
-    def storage_path(self) -> Path:
-        path = settings.base_dir / settings.stored_cv_dir
-        path.mkdir(parents=True, exist_ok=True)
-        return path
+    def _storage_path(self, session_id: str) -> Path:
+        if not is_valid_session_id(session_id):
+            raise ValueError("Invalid session")
+        return settings.session_storage_path(session_id)
 
-    def save(self, file_path: Path, filename: str, paragraphs: list[ParagraphInfo]) -> None:
+    def save(
+        self,
+        session_id: str,
+        file_path: Path,
+        filename: str,
+        paragraphs: list[ParagraphInfo],
+    ) -> None:
+        storage_path = self._storage_path(session_id)
         suffix = file_path.suffix.lower()
-        target = self.storage_path / f"{CV_BASENAME}{suffix}"
+        target = storage_path / f"{CV_BASENAME}{suffix}"
         shutil.copy2(file_path, target)
 
-        for old in self.storage_path.glob(f"{CV_BASENAME}.*"):
+        for old in storage_path.glob(f"{CV_BASENAME}.*"):
             if old != target:
                 old.unlink(missing_ok=True)
 
@@ -32,16 +39,17 @@ class CVStorageService:
             paragraphs = fresh_paragraphs
 
         metadata = {
-            "filename": filename,
+            "filename": Path(filename).name,
             "suffix": suffix,
             "saved_at": datetime.now(timezone.utc).isoformat(),
             "paragraphs": [paragraph.model_dump() for paragraph in paragraphs],
         }
-        with open(self.storage_path / METADATA_FILE, "w", encoding="utf-8") as file:
+        with open(storage_path / METADATA_FILE, "w", encoding="utf-8") as file:
             json.dump(metadata, file, ensure_ascii=False, indent=2)
 
-    def load_metadata(self) -> dict | None:
-        metadata_path = self.storage_path / METADATA_FILE
+    def load_metadata(self, session_id: str) -> dict | None:
+        storage_path = self._storage_path(session_id)
+        metadata_path = storage_path / METADATA_FILE
         if not metadata_path.exists():
             return None
 
@@ -49,7 +57,7 @@ class CVStorageService:
             data = json.load(file)
 
         suffix = data.get("suffix", ".docx")
-        cv_path = self.storage_path / f"{CV_BASENAME}{suffix}"
+        cv_path = storage_path / f"{CV_BASENAME}{suffix}"
         if not cv_path.exists():
             return None
 
@@ -60,8 +68,8 @@ class CVStorageService:
         data["paragraphs"] = paragraphs
         return data
 
-    def get_file_path(self) -> Path | None:
-        metadata = self.load_metadata()
+    def get_file_path(self, session_id: str) -> Path | None:
+        metadata = self.load_metadata(session_id)
         if not metadata:
             return None
         path = Path(metadata["file_path"])

@@ -6,11 +6,23 @@ function getApiBase(): string {
   if (typeof window !== "undefined") {
     return `${window.location.origin}/api-backend`;
   }
+  const backend = process.env.BACKEND_URL?.replace(/\/$/, "");
+  if (backend) {
+    return `${backend}/api`;
+  }
   return "http://127.0.0.1:8001/api";
 }
 
 function apiUrl(path: string): string {
   return `${getApiBase()}/${path.replace(/^\//, "")}`;
+}
+
+function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  return fetch(input, {
+    credentials: "include",
+    ...init,
+    headers: init?.headers,
+  });
 }
 
 async function readApiError(response: Response, fallback: string): Promise<string> {
@@ -19,7 +31,7 @@ async function readApiError(response: Response, fallback: string): Promise<strin
     return payload.detail;
   }
   if (response.status === 404) {
-    return "API introuvable — vérifiez que le backend est démarré (port 8001).";
+    return "API introuvable — vérifiez que le backend est accessible (BACKEND_URL / NEXT_PUBLIC_API_URL).";
   }
   if (response.status >= 500) {
     return fallback;
@@ -45,17 +57,24 @@ export interface CVPreviewResult {
   paragraphs: CVParagraph[];
 }
 
-export interface StoredCVResult {
-  filename: string;
-  paragraphs: CVParagraph[];
-  saved_at?: string | null;
-}
-
 export interface MatchScoreResult {
   score: number;
   summary: string;
   strengths: string[];
   gaps: string[];
+}
+
+export interface JobAnalysisResult extends MatchScoreResult {
+  present_keywords: string[];
+  missing_keywords: string[];
+  keyword_suggestions: string[];
+}
+
+export interface ApplyModificationsResult {
+  download_url: string;
+  download_url_pdf?: string | null;
+  modifications_count: number;
+  tailored_paragraphs: CVParagraph[];
 }
 
 export interface ApplicationKitResult {
@@ -68,11 +87,13 @@ export interface ApplicationKitResult {
   summary: string;
 }
 
+export type TailorIntensity = "light" | "strong" | "ats";
+
 export interface TailorResult {
   job_id: string;
   original_filename: string;
   output_filename: string;
-  download_url: string;
+  download_url?: string | null;
   download_url_pdf?: string | null;
   modifications_count: number;
   summary: string;
@@ -98,7 +119,7 @@ export interface LLMProvidersResponse {
 }
 
 export async function fetchPrompts(): Promise<PromptConfig> {
-  const response = await fetch(apiUrl("prompts"));
+  const response = await apiFetch(apiUrl("prompts"));
   if (!response.ok) {
     throw new Error("Failed to load prompts");
   }
@@ -106,7 +127,7 @@ export async function fetchPrompts(): Promise<PromptConfig> {
 }
 
 export async function savePrompts(config: PromptConfig): Promise<PromptConfig> {
-  const response = await fetch(apiUrl("prompts"), {
+  const response = await apiFetch(apiUrl("prompts"), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(config),
@@ -118,7 +139,7 @@ export async function savePrompts(config: PromptConfig): Promise<PromptConfig> {
 }
 
 export async function resetPrompts(): Promise<PromptConfig> {
-  const response = await fetch(apiUrl("prompts/reset"), { method: "POST" });
+  const response = await apiFetch(apiUrl("prompts/reset"), { method: "POST" });
   if (!response.ok) {
     throw new Error("Failed to reset prompts");
   }
@@ -126,31 +147,11 @@ export async function resetPrompts(): Promise<PromptConfig> {
 }
 
 export async function fetchLLMProviders(): Promise<LLMProvidersResponse> {
-  const response = await fetch(apiUrl("llm/providers"));
+  const response = await apiFetch(apiUrl("llm/providers"));
   if (!response.ok) {
     throw new Error("Failed to load LLM providers");
   }
   return response.json();
-}
-
-export async function fetchLastCV(): Promise<StoredCVResult> {
-  const response = await fetch(apiUrl("cv/last"));
-  if (!response.ok) {
-    throw new Error("No CV in memory");
-  }
-  return response.json();
-}
-
-export async function fetchLastCVFile(): Promise<File> {
-  const response = await fetch(apiUrl("cv/last/file"));
-  if (!response.ok) {
-    throw new Error("No CV file in memory");
-  }
-  const disposition = response.headers.get("content-disposition") ?? "";
-  const match = disposition.match(/filename="?([^"]+)"?/i);
-  const filename = match?.[1] ?? "last_cv.docx";
-  const blob = await response.blob();
-  return new File([blob], filename, { type: blob.type || "application/octet-stream" });
 }
 
 export async function generateApplicationKit(params: {
@@ -164,7 +165,7 @@ export async function generateApplicationKit(params: {
   tone?: "professional" | "friendly";
   paragraphs?: CVParagraph[];
 }): Promise<ApplicationKitResult> {
-  const response = await fetch(apiUrl("application/kit"), {
+  const response = await apiFetch(apiUrl("application/kit"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -187,6 +188,78 @@ export async function generateApplicationKit(params: {
   return response.json();
 }
 
+export async function analyzeJob(params: {
+  jobDescription: string;
+  outputLanguage: "fr" | "en";
+  llmProvider: "openai" | "groq" | "claude";
+  llmModel: string;
+  paragraphs?: CVParagraph[];
+}): Promise<JobAnalysisResult> {
+  const response = await apiFetch(apiUrl("analyze"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      job_description: params.jobDescription,
+      output_language: params.outputLanguage,
+      llm_provider: params.llmProvider,
+      llm_model: params.llmModel,
+      paragraphs: params.paragraphs,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, "Analysis failed"));
+  }
+
+  return response.json();
+}
+
+export async function retryModifications(params: {
+  jobDescription: string;
+  outputLanguage: "fr" | "en";
+  llmProvider: "openai" | "groq" | "claude";
+  llmModel: string;
+  tailorIntensity: TailorIntensity;
+  rejectedBlockIds: string[];
+  keptModifications: Record<string, string>;
+}): Promise<RetryModificationsResult> {
+  const response = await apiFetch(apiUrl("tailor/retry"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      job_description: params.jobDescription,
+      output_language: params.outputLanguage,
+      llm_provider: params.llmProvider,
+      llm_model: params.llmModel,
+      tailor_intensity: params.tailorIntensity,
+      rejected_block_ids: params.rejectedBlockIds,
+      kept_modifications: params.keptModifications,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, "Retry failed"));
+  }
+
+  return response.json();
+}
+
+export async function applyModifications(
+  modifications: Record<string, string>,
+): Promise<ApplyModificationsResult> {
+  const response = await apiFetch(apiUrl("tailor/apply"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ modifications }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, "Apply modifications failed"));
+  }
+
+  return response.json();
+}
+
 export async function computeMatchScore(params: {
   jobDescription: string;
   outputLanguage: "fr" | "en";
@@ -194,7 +267,7 @@ export async function computeMatchScore(params: {
   llmModel: string;
   paragraphs?: CVParagraph[];
 }): Promise<MatchScoreResult> {
-  const response = await fetch(apiUrl("match"), {
+  const response = await apiFetch(apiUrl("match"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -217,7 +290,7 @@ export async function previewCV(file: File): Promise<CVPreviewResult> {
   const formData = new FormData();
   formData.append("file", file);
 
-  const response = await fetch(apiUrl("preview"), {
+  const response = await apiFetch(apiUrl("preview"), {
     method: "POST",
     body: formData,
   });
@@ -229,12 +302,48 @@ export async function previewCV(file: File): Promise<CVPreviewResult> {
   return response.json();
 }
 
+export interface CoverLetterExportResult {
+  filename: string;
+  download_url: string;
+  download_url_pdf?: string | null;
+}
+
+export interface RetryModificationsResult {
+  modified_paragraphs: Record<string, string>;
+  tailored_paragraphs: CVParagraph[];
+  summary: string;
+  modifications_count: number;
+}
+
+export async function exportCoverLetterDocx(params: {
+  coverLetter: string;
+  companyName?: string;
+  jobTitle?: string;
+}): Promise<CoverLetterExportResult> {
+  const response = await apiFetch(apiUrl("application/cover-letter/docx"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      cover_letter: params.coverLetter,
+      company_name: params.companyName,
+      job_title: params.jobTitle,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, "Cover letter export failed"));
+  }
+
+  return response.json();
+}
+
 export async function tailorCV(params: {
   file: File | null;
   jobDescription: string;
   outputLanguage: "fr" | "en";
   llmProvider: "openai" | "groq" | "claude";
   llmModel: string;
+  tailorIntensity?: TailorIntensity;
   customSystemPrompt?: string;
   customUserPrompt?: string;
 }): Promise<TailorResult> {
@@ -246,6 +355,7 @@ export async function tailorCV(params: {
   formData.append("output_language", params.outputLanguage);
   formData.append("llm_provider", params.llmProvider);
   formData.append("llm_model", params.llmModel);
+  formData.append("tailor_intensity", params.tailorIntensity ?? "strong");
 
   if (params.customSystemPrompt) {
     formData.append("custom_system_prompt", params.customSystemPrompt);
@@ -254,7 +364,7 @@ export async function tailorCV(params: {
     formData.append("custom_user_prompt", params.customUserPrompt);
   }
 
-  const response = await fetch(apiUrl("tailor"), {
+  const response = await apiFetch(apiUrl("tailor"), {
     method: "POST",
     body: formData,
   });

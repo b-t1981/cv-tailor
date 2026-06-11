@@ -2,7 +2,15 @@
   "name": "cv-tailor-frontend",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
+    "write-build-info": "node scripts/write-build-info.mjs",
+    "install-git-hooks": "node scripts/install-git-hooks.mjs",
+    "predev": "node scripts/write-build-info.mjs",
+    "prebuild": "node scripts/write-build-info.mjs",
+    "postinstall": "node scripts/install-git-hooks.mjs",
     "dev": "next dev --turbo",
     "dev:clean": "node -e \"try{require('fs').rmSync('.next',{recursive:true,force:true})}catch(e){}\" && next dev --turbo",
     "build": "next build",

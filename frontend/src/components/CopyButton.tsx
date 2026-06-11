@@ -26,7 +26,7 @@ export function CopyButton({ text, className = "" }: CopyButtonProps) {
     <button
       type="button"
       onClick={handleCopy}
-      className={`btn-secondary px-3 py-1 text-xs ${className}`}
+      className={`btn-secondary w-full px-3 py-2 text-xs sm:w-auto sm:py-1 ${className}`}
     >
       {copied ? t("copied") : t("copy")}
     </button>

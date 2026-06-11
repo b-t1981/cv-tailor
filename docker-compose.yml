@@ -2,7 +2,7 @@ services:
   backend:
     build: ./backend
     ports:
-      - "8000:8000"
+      - "8001:8001"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
@@ -10,22 +10,26 @@ services:
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
-      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-openai}
+      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-groq}
       - CORS_ORIGINS=http://localhost:3000
+      - MAX_UPLOAD_BYTES=10485760
+      - OUTPUT_TTL_HOURS=48
     volumes:
       - ./backend/prompts:/app/prompts
       - ./backend/outputs:/app/outputs
+      - ./backend/stored_cv:/app/stored_cv
     restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
       args:
-        - NEXT_PUBLIC_API_URL=http://localhost:8000
+        - NEXT_PUBLIC_API_URL=http://localhost:8001
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - BACKEND_URL=http://backend:8001
+      - NEXT_PUBLIC_API_URL=http://localhost:8001
     depends_on:
       - backend
     restart: unless-stopped

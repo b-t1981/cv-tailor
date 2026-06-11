@@ -4,8 +4,8 @@ from app.models.schemas import ParagraphInfo
 
 STOP_WORDS = {
     "avec", "dans", "pour", "sur", "des", "les", "une", "par", "aux", "son", "ses",
-    "the", "and", "for", "with", "from", "that", "this", "into", "via", "des",
-    "une", "est", "sont", "été", "être", "dans", "plus", "tout", "tous", "toute",
+    "the", "and", "for", "with", "from", "that", "this", "into", "via",
+    "est", "sont", "été", "être", "plus", "tout", "tous", "toute",
 }
 
 ACRONYM_RE = re.compile(r"\b[A-Z]{2,}\b")
@@ -24,7 +24,12 @@ def _acronyms(text: str) -> set[str]:
     return set(ACRONYM_RE.findall(text))
 
 
-def _is_safe_modification(original: str, new: str, cv_vocabulary: set[str]) -> bool:
+def _is_safe_modification(
+    original: str,
+    new: str,
+    cv_vocabulary: set[str],
+    max_new_word_ratio: float = 0.55,
+) -> bool:
     original = original.strip()
     new = new.strip()
     if not original or not new or original == new:
@@ -43,14 +48,12 @@ def _is_safe_modification(original: str, new: str, cv_vocabulary: set[str]) -> b
     if invented_words:
         return False
 
-    if len(added_words) / len(new_words) > 0.35:
+    # Allow richer rephrasing; block only when most of the line is new vocabulary.
+    if len(added_words) / len(new_words) > max_new_word_ratio:
         return False
 
     added_acronyms = _acronyms(new) - _acronyms(original)
     if added_acronyms:
-        return False
-
-    if "(" in new and "(" not in original and new.count(",") > original.count(",") + 1:
         return False
 
     return True
@@ -59,6 +62,7 @@ def _is_safe_modification(original: str, new: str, cv_vocabulary: set[str]) -> b
 def sanitize_modifications(
     paragraphs: list[ParagraphInfo],
     modifications: dict[str, str],
+    max_new_word_ratio: float = 0.55,
 ) -> dict[str, str]:
     """Drop LLM changes that duplicate lines or invent content."""
     original_by_id = {paragraph.id: paragraph.text.strip() for paragraph in paragraphs}
@@ -76,7 +80,7 @@ def sanitize_modifications(
 
         new_text = raw_new_text.strip()
         original = original_by_id[block_id]
-        if not _is_safe_modification(original, new_text, cv_vocabulary):
+        if not _is_safe_modification(original, new_text, cv_vocabulary, max_new_word_ratio):
             continue
 
         if new_text in existing_texts and new_text != original:
