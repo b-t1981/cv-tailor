@@ -86,8 +86,9 @@ render.yaml
 ### 2. Frontend (Vercel)
 
 1. Importer le dépôt GitHub sur [vercel.com](https://vercel.com).
-2. **Root Directory** : `frontend`
-3. Framework : Next.js (détecté automatiquement)
+2. Si Vercel propose **Services** (frontend + backend) : le `vercel.json` à la racine ne déploie que le **frontend** — cliquez **Refresh**, puis **Deploy**. Le backend reste sur Render.
+   - Alternative : preset **Next.js** + **Root Directory** = `frontend` (sans mode Services).
+3. Framework : Next.js
 4. Variables d'environnement (voir `frontend/.env.vercel.example`) :
 
 | Variable | Exemple | Rôle |
