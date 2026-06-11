@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
+import { BackendConnectionBanner } from "@/components/BackendConnectionBanner";
 import { ApplicationHistoryPanel } from "@/components/ApplicationHistoryPanel";
 import { CVCompareView } from "@/components/CVCompareView";
 import { FileUpload } from "@/components/FileUpload";
@@ -55,10 +56,20 @@ export default function HomePage() {
   const [scoreAfter, setScoreAfter] = useState<number | null>(null);
   const [showAdvancedLlm, setShowAdvancedLlm] = useState(false);
   const [invalidFileError, setInvalidFileError] = useState<string | null>(null);
+  const [previewSlowHint, setPreviewSlowHint] = useState(false);
 
   useEffect(() => {
     fetchPrompts().then(setPrompts).catch(() => setError(t("error")));
   }, [t]);
+
+  useEffect(() => {
+    if (!previewLoading) {
+      setPreviewSlowHint(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setPreviewSlowHint(true), 8_000);
+    return () => window.clearTimeout(timer);
+  }, [previewLoading]);
 
   useEffect(() => {
     const saved = sessionStorage.getItem(JOB_STORAGE_KEY);
@@ -257,6 +268,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-gradient-to-b from-brand-50 to-slate-100">
       <AppHeader active="cv" />
       <main className="page-main">
+        <BackendConnectionBanner />
         <PrivacyNotice />
         <FileUpload
           file={file}
@@ -269,7 +281,23 @@ export default function HomePage() {
           </div>
         )}
         {previewLoading && (
-          <div className="card text-center text-sm text-slate-500">{t("previewLoading")}</div>
+          <div className="card space-y-2 text-center text-sm text-slate-500">
+            <p className="flex items-center justify-center gap-2">
+              <span
+                className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-brand-500 border-t-transparent"
+                aria-hidden
+              />
+              {t("previewLoading")}
+            </p>
+            {previewSlowHint && (
+              <p className="text-xs text-amber-700">{t("previewLoadingSlow")}</p>
+            )}
+          </div>
+        )}
+        {error && previewLoading === false && file && originalParagraphs.length === 0 && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
         )}
 
         <div className="card">

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
+import { BackendConnectionBanner } from "@/components/BackendConnectionBanner";
 import { CopyButton } from "@/components/CopyButton";
 import { LLMSelector, type LLMProviderId } from "@/components/LLMSelector";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
@@ -124,6 +125,7 @@ export default function ApplicationPage() {
       <AppHeader active="application" />
 
       <main className="page-main">
+        <BackendConnectionBanner />
         <PrivacyNotice />
         <div className="card">
           <h2 className="mb-1 text-lg font-semibold text-slate-900">{t("applicationFormTitle")}</h2>

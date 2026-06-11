@@ -17,12 +17,32 @@ function apiUrl(path: string): string {
   return `${getApiBase()}/${path.replace(/^\//, "")}`;
 }
 
-function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+function apiFetch(input: string, init?: RequestInit, timeoutMs = 120_000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+
   return fetch(input, {
     credentials: "include",
     ...init,
     headers: init?.headers,
-  });
+    signal: controller.signal,
+  })
+    .catch((err: unknown) => {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new Error(
+          "Délai dépassé — le backend met trop de temps à répondre (Render gratuit : jusqu'à 1 min au 1er appel). Réessayez.",
+        );
+      }
+      if (err instanceof TypeError) {
+        throw new Error(
+          "Connexion au backend impossible — vérifiez NEXT_PUBLIC_API_URL, CORS_ORIGINS sur Render, et que l'API est en ligne.",
+        );
+      }
+      throw err;
+    })
+    .finally(() => {
+      window.clearTimeout(timer);
+    });
 }
 
 async function readApiError(response: Response, fallback: string): Promise<string> {
@@ -31,7 +51,12 @@ async function readApiError(response: Response, fallback: string): Promise<strin
     return payload.detail;
   }
   if (response.status === 404) {
-    return "API introuvable — vérifiez que le backend est accessible (BACKEND_URL / NEXT_PUBLIC_API_URL).";
+    const onVercel =
+      typeof window !== "undefined" && window.location.hostname.endsWith(".vercel.app");
+    if (onVercel && !process.env.NEXT_PUBLIC_API_URL) {
+      return "Backend non relié : ajoutez NEXT_PUBLIC_API_URL et BACKEND_URL sur Vercel (URL Render), puis redéployez.";
+    }
+    return "API introuvable — vérifiez que le backend Render est en ligne et que NEXT_PUBLIC_API_URL est correct.";
   }
   if (response.status >= 500) {
     return fallback;
@@ -116,6 +141,17 @@ export interface LLMProviderInfo {
 export interface LLMProvidersResponse {
   providers: LLMProviderInfo[];
   default_provider: string;
+}
+
+export async function checkBackendHealth(): Promise<boolean> {
+  try {
+    const response = await apiFetch(apiUrl("health"), undefined, 25_000);
+    if (!response.ok) return false;
+    const payload = await response.json();
+    return payload?.status === "ok";
+  } catch {
+    return false;
+  }
 }
 
 export async function fetchPrompts(): Promise<PromptConfig> {
@@ -290,10 +326,14 @@ export async function previewCV(file: File): Promise<CVPreviewResult> {
   const formData = new FormData();
   formData.append("file", file);
 
-  const response = await apiFetch(apiUrl("preview"), {
-    method: "POST",
-    body: formData,
-  });
+  const response = await apiFetch(
+    apiUrl("preview"),
+    {
+      method: "POST",
+      body: formData,
+    },
+    120_000,
+  );
 
   if (!response.ok) {
     throw new Error(await readApiError(response, "Preview failed"));

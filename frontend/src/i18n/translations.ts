@@ -63,6 +63,8 @@ export const translations = {
     compareLines: "lignes extraites",
     compareChanged: "lignes modifiées",
     previewLoading: "Chargement du CV...",
+    previewLoadingSlow:
+      "Le serveur backend démarre (plan Render gratuit : jusqu'à 1 minute). Patientez ou réessayez dans un instant.",
     noLlmConfigured:
       "Aucune clé API valide. Ajoutez une clé dans backend/.env (OPENAI_API_KEY, GROQ_API_KEY ou ANTHROPIC_API_KEY).",
     matchTitle: "Adéquation CV / Poste",
@@ -131,6 +133,9 @@ export const translations = {
     tailorIntensityAts: "ATS",
     tailorIntensityAtsHint: "Optimise les mots-clés pour les filtres automatiques (sans mentir).",
     keywordsSuggestions: "Conseils pour combler les écarts",
+    backendMissingTitle: "Backend API inaccessible",
+    backendMissingHint:
+      "Le frontend Vercel doit pointer vers l'API Render : variables NEXT_PUBLIC_API_URL et BACKEND_URL sur Vercel, CORS_ORIGINS sur Render, puis redéploiement.",
     privacyNotice:
       "Confidentialité : votre CV et les offres d'emploi sont envoyés au fournisseur IA configuré (Groq, OpenAI ou Claude). Données stockées localement sur ce serveur.",
     historyTitle: "Historique des candidatures",
@@ -203,6 +208,8 @@ export const translations = {
     compareLines: "extracted lines",
     compareChanged: "lines changed",
     previewLoading: "Loading CV...",
+    previewLoadingSlow:
+      "The backend server is waking up (Render free tier: up to 1 minute). Please wait or try again shortly.",
     noLlmConfigured:
       "No valid API key found. Add one in backend/.env (OPENAI_API_KEY, GROQ_API_KEY, or ANTHROPIC_API_KEY).",
     matchTitle: "CV / Job fit",
@@ -271,6 +278,9 @@ export const translations = {
     tailorIntensityAts: "ATS",
     tailorIntensityAtsHint: "Optimize keywords for ATS filters (truthfully).",
     keywordsSuggestions: "Tips to address gaps",
+    backendMissingTitle: "Backend API unreachable",
+    backendMissingHint:
+      "Point the Vercel frontend to your Render API: set NEXT_PUBLIC_API_URL and BACKEND_URL on Vercel, CORS_ORIGINS on Render, then redeploy.",
     privacyNotice:
       "Privacy: your CV and job descriptions are sent to the configured AI provider (Groq, OpenAI, or Claude). Data is stored locally on this server.",
     historyTitle: "Application history",
