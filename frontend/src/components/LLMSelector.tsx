@@ -11,9 +11,17 @@ interface LLMSelectorProps {
   model: string;
   onChange: (provider: LLMProviderId, model: string) => void;
   onConfiguredChange?: (hasConfiguredProvider: boolean) => void;
+  /** Masque l'UI tout en conservant la logique (Groq par défaut si hidden). */
+  hidden?: boolean;
 }
 
-export function LLMSelector({ provider, model, onChange, onConfiguredChange }: LLMSelectorProps) {
+export function LLMSelector({
+  provider,
+  model,
+  onChange,
+  onConfiguredChange,
+  hidden = false,
+}: LLMSelectorProps) {
   const { t } = useI18n();
   const [providers, setProviders] = useState<LLMProviderInfo[]>([]);
   const [defaultProvider, setDefaultProvider] = useState<LLMProviderId>("openai");
@@ -23,9 +31,11 @@ export function LLMSelector({ provider, model, onChange, onConfiguredChange }: L
       .then((data) => {
         setProviders(data.providers);
         setDefaultProvider(data.default_provider as LLMProviderId);
-        const initial =
-          data.providers.find((item) => item.id === data.default_provider && item.configured) ??
-          data.providers.find((item) => item.configured);
+        const initial = hidden
+          ? (data.providers.find((item) => item.id === "groq" && item.configured) ??
+            data.providers.find((item) => item.configured))
+          : (data.providers.find((item) => item.id === data.default_provider && item.configured) ??
+            data.providers.find((item) => item.configured));
         onConfiguredChange?.(data.providers.some((item) => item.configured));
         if (initial) {
           onChange(initial.id as LLMProviderId, initial.default_model);
@@ -42,6 +52,10 @@ export function LLMSelector({ provider, model, onChange, onConfiguredChange }: L
     const info = providers.find((item) => item.id === nextProvider);
     onChange(nextProvider, info?.default_model ?? model);
   };
+
+  if (hidden) {
+    return null;
+  }
 
   return (
     <div className="mt-4 space-y-4">

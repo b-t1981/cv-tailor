@@ -4,6 +4,7 @@ from pathlib import Path
 
 import fitz
 
+from app.config import settings
 from app.models.schemas import ParagraphInfo
 
 
@@ -76,10 +77,12 @@ def export_docx_to_pdf(
     pdf_path: Path,
     fallback_paragraphs: list[ParagraphInfo] | None = None,
 ) -> bool:
-    if _convert_with_docx2pdf(docx_path, pdf_path):
-        return True
+    # LibreOffice (headless) puis PyMuPDF — pas de fenêtre système.
     if _convert_with_libreoffice(docx_path, pdf_path):
         return True
-    if fallback_paragraphs:
-        return _write_paragraphs_pdf(fallback_paragraphs, pdf_path)
+    if fallback_paragraphs and _write_paragraphs_pdf(fallback_paragraphs, pdf_path):
+        return True
+    # docx2pdf pilote Word via COM → peut afficher « Attente imprimante » sur Windows.
+    if settings.pdf_use_word and _convert_with_docx2pdf(docx_path, pdf_path):
+        return True
     return False

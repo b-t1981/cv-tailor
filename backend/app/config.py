@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     output_dir: str = "outputs"
     stored_cv_dir: str = "stored_cv"
     cors_origins: str = "http://localhost:3000"
+    # docx2pdf ouvre Microsoft Word (dialogue imprimante sur Windows) — désactivé par défaut
+    pdf_use_word: bool = False
 
     @property
     def cors_origin_list(self) -> list[str]:

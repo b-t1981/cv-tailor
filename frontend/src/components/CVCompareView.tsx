@@ -69,6 +69,8 @@ interface CVCompareViewProps {
   downloadUrlPdf?: string | null;
   modificationsCount?: number;
   summary?: string | null;
+  /** Masque l'UI tout en conservant le composant dans le code. */
+  hidden?: boolean;
 }
 
 export function CVCompareView({
@@ -79,6 +81,7 @@ export function CVCompareView({
   downloadUrlPdf,
   modificationsCount,
   summary,
+  hidden = false,
 }: CVCompareViewProps) {
   const { t } = useI18n();
 
@@ -88,7 +91,7 @@ export function CVCompareView({
   );
   const modifiedCount = modifiedIds.size;
 
-  if (!hasResult && originalParagraphs.length === 0 && !filename) {
+  if (hidden || (!hasResult && originalParagraphs.length === 0 && !filename)) {
     return null;
   }
 

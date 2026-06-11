@@ -28,8 +28,8 @@ export default function HomePage() {
   const [file, setFile] = useState<File | null>(null);
   const [jobDescription, setJobDescription] = useState("");
   const [outputLanguage, setOutputLanguage] = useState<"fr" | "en">("fr");
-  const [llmProvider, setLlmProvider] = useState<LLMProviderId>("openai");
-  const [llmModel, setLlmModel] = useState("gpt-4o-mini");
+  const [llmProvider, setLlmProvider] = useState<LLMProviderId>("groq");
+  const [llmModel, setLlmModel] = useState("llama-3.3-70b-versatile");
   const [prompts, setPrompts] = useState<PromptConfig>({
     system_prompt: "",
     user_prompt: "",
@@ -218,10 +218,6 @@ export default function HomePage() {
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-8">
         <FileUpload file={file} restored={cvRestored} onFileSelect={handleFileSelect} />
 
-        {previewLoading && (
-          <div className="card text-center text-sm text-slate-500">{t("previewLoading")}</div>
-        )}
-
         <div className="card">
           <h2 className="mb-1 text-lg font-semibold text-slate-900">{t("jobTitle")}</h2>
           <textarea
@@ -269,6 +265,7 @@ export default function HomePage() {
           </div>
 
           <LLMSelector
+            hidden
             provider={llmProvider}
             model={llmModel}
             onChange={(nextProvider, nextModel) => {
@@ -314,6 +311,7 @@ export default function HomePage() {
         <div id="cv-compare-section">
           {hasCv && !previewLoading && (
             <CVCompareView
+              hidden
               originalParagraphs={compareOriginal}
               tailoredParagraphs={result?.tailored_paragraphs ?? null}
               filename={previewFilename || file?.name}

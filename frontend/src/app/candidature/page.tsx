@@ -22,8 +22,8 @@ export default function ApplicationPage() {
   const [recruiterName, setRecruiterName] = useState("");
   const [tone, setTone] = useState<"professional" | "friendly">("professional");
   const [outputLanguage, setOutputLanguage] = useState<"fr" | "en">("fr");
-  const [llmProvider, setLlmProvider] = useState<LLMProviderId>("openai");
-  const [llmModel, setLlmModel] = useState("gpt-4o-mini");
+  const [llmProvider, setLlmProvider] = useState<LLMProviderId>("groq");
+  const [llmModel, setLlmModel] = useState("llama-3.3-70b-versatile");
   const [hasLlmConfigured, setHasLlmConfigured] = useState(true);
   const [cvParagraphs, setCvParagraphs] = useState<CVParagraph[]>([]);
   const [cvFilename, setCvFilename] = useState("");
@@ -216,6 +216,7 @@ export default function ApplicationPage() {
           </div>
 
           <LLMSelector
+            hidden
             provider={llmProvider}
             model={llmModel}
             onChange={(nextProvider, nextModel) => {
