@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+    cerebras_api_key: str = ""
+    cerebras_model: str = "llama-3.3-70b"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
     default_llm_provider: LLMProvider = "openai"
@@ -96,6 +98,8 @@ class Settings(BaseSettings):
             "your-openai",
             "your-claude",
             "your-groq",
+            "your-cerebras",
+            "csk-your",
             "sk-your",
             "gsk-your",
             "sk-ant-your",
@@ -117,6 +121,7 @@ class Settings(BaseSettings):
         keys = {
             "openai": self.openai_api_key,
             "groq": self.groq_api_key,
+            "cerebras": self.cerebras_api_key,
             "claude": self.anthropic_api_key,
         }
         key = keys.get(provider, "")
@@ -132,6 +137,7 @@ class Settings(BaseSettings):
         models = {
             "openai": self.openai_model,
             "groq": self.groq_model,
+            "cerebras": self.cerebras_model,
             "claude": self.anthropic_model,
         }
         return models[provider]

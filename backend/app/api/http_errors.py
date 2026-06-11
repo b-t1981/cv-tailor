@@ -10,6 +10,8 @@ def _infer_provider(message: str) -> str:
     for provider_id, label in PROVIDER_LABELS.items():
         if provider_id in lower or label.lower() in lower:
             return provider_id
+    if "cerebras" in lower:
+        return "cerebras"
     return "groq"
 
 

@@ -1,7 +1,10 @@
 import json
+import logging
 import re
 import unicodedata
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 from anthropic import Anthropic, AuthenticationError as AnthropicAuthError
 from openai import APIStatusError, AuthenticationError, OpenAI
@@ -28,7 +31,17 @@ AVAILABLE_MODELS: dict[LLMProvider, list[str]] = {
 PROVIDER_LABELS = {
     "openai": "OpenAI",
     "groq": "Groq",
+    "cerebras": "Cerebras",
     "claude": "Claude (Anthropic)",
+}
+
+OpenAICompatibleProvider = Literal["openai", "groq", "cerebras"]
+
+_GROQ_TO_CEREBRAS_MODEL: dict[str, str] = {
+    "llama-3.3-70b-versatile": "llama-3.3-70b",
+    "llama-3.1-8b-instant": "llama3.1-8b",
+    "mixtral-8x7b-32768": "llama-3.3-70b",
+    "gemma2-9b-it": "llama3.1-8b",
 }
 
 # Ordre = priorité (le plus spécifique en premier). Pas de "mission" seul (matche "Our Purpose and Mission").
@@ -278,6 +291,57 @@ class LLMService:
             cls._raise_provider_error(exc, provider)
         raise exc
 
+    @staticmethod
+    def _is_rate_limit_error(exc: Exception) -> bool:
+        if getattr(exc, "status_code", None) == 429:
+            return True
+        msg = str(exc).lower()
+        return "rate_limit_exceeded" in msg or "rate limit" in msg
+
+    def _cerebras_model_for(self, groq_model: str) -> str:
+        return _GROQ_TO_CEREBRAS_MODEL.get(groq_model, settings.cerebras_model)
+
+    def _call_llm(
+        self,
+        provider: str,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.1,
+    ) -> str:
+        try:
+            if provider == "claude":
+                return self._call_claude(system_prompt, user_prompt, model, temperature=temperature)
+            return self._call_openai_compatible(
+                provider=provider,  # type: ignore[arg-type]
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=model,
+                temperature=temperature,
+            )
+        except Exception as exc:
+            if (
+                provider == "groq"
+                and self._is_rate_limit_error(exc)
+                and settings.is_provider_configured("cerebras")
+            ):
+                fallback_model = self._cerebras_model_for(model)
+                logger.warning(
+                    "Groq rate limit reached, falling back to Cerebras (%s)",
+                    fallback_model,
+                )
+                try:
+                    return self._call_openai_compatible(
+                        provider="cerebras",
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        model=fallback_model,
+                        temperature=temperature,
+                    )
+                except Exception as fallback_exc:
+                    self._handle_provider_exception(fallback_exc, "cerebras")
+            self._handle_provider_exception(exc, provider)
+
     def list_providers(self) -> LLMProvidersResponse:
         providers = [
             LLMProviderInfo(
@@ -327,19 +391,13 @@ class LLMService:
             .replace("{output_language}", language_label)
         )
 
-        try:
-            if selected_provider == "claude":
-                content = self._call_claude(system_prompt, user_prompt, selected_model, temperature=temperature)
-            else:
-                content = self._call_openai_compatible(
-                    provider=selected_provider,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    model=selected_model,
-                    temperature=temperature,
-                )
-        except Exception as exc:
-            self._handle_provider_exception(exc, selected_provider)
+        content = self._call_llm(
+            provider=selected_provider,
+            model=selected_model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+        )
 
         return self._parse_response(content)
 
@@ -378,18 +436,12 @@ class LLMService:
             "Evaluate the match between this CV and the job. Score 0-100."
         )
 
-        try:
-            if selected_provider == "claude":
-                content = self._call_claude(system_prompt, user_prompt, selected_model)
-            else:
-                content = self._call_openai_compatible(
-                    provider=selected_provider,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    model=selected_model,
-                )
-        except Exception as exc:
-            self._handle_provider_exception(exc, selected_provider)
+        content = self._call_llm(
+            provider=selected_provider,
+            model=selected_model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
 
         return self._parse_match_response(content)
 
@@ -444,18 +496,12 @@ class LLMService:
             "Analyze match score and keyword coverage."
         )
 
-        try:
-            if selected_provider == "claude":
-                content = self._call_claude(system_prompt, user_prompt, selected_model)
-            else:
-                content = self._call_openai_compatible(
-                    provider=selected_provider,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    model=selected_model,
-                )
-        except Exception as exc:
-            self._handle_provider_exception(exc, selected_provider)
+        content = self._call_llm(
+            provider=selected_provider,
+            model=selected_model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
 
         result = self._parse_analysis_response(content)
         result = self._sanitize_analysis_keywords(job_description, cv_paragraphs, result)
@@ -515,19 +561,13 @@ class LLMService:
             "Generate the application kit."
         )
 
-        try:
-            if selected_provider == "claude":
-                content = self._call_claude(system_prompt, user_prompt, selected_model, temperature=0.4)
-            else:
-                content = self._call_openai_compatible(
-                    provider=selected_provider,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    model=selected_model,
-                    temperature=0.4,
-                )
-        except Exception as exc:
-            self._handle_provider_exception(exc, selected_provider)
+        content = self._call_llm(
+            provider=selected_provider,
+            model=selected_model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.4,
+        )
 
         return self._parse_application_kit(content)
 
@@ -540,7 +580,7 @@ class LLMService:
 
     def _call_openai_compatible(
         self,
-        provider: Literal["openai", "groq"],
+        provider: OpenAICompatibleProvider,
         system_prompt: str,
         user_prompt: str,
         model: str,
@@ -548,10 +588,16 @@ class LLMService:
     ) -> str:
         if provider == "openai":
             client = OpenAI(api_key=settings.openai_api_key)
-        else:
+        elif provider == "groq":
             client = OpenAI(
                 api_key=settings.groq_api_key,
                 base_url="https://api.groq.com/openai/v1",
+            )
+            system_prompt, user_prompt = self._prepare_groq_messages(system_prompt, user_prompt)
+        else:
+            client = OpenAI(
+                api_key=settings.cerebras_api_key,
+                base_url="https://api.cerebras.ai/v1",
             )
             system_prompt, user_prompt = self._prepare_groq_messages(system_prompt, user_prompt)
 
@@ -871,19 +917,13 @@ class LLMService:
             "Detect language and translate lines that need translation."
         )
 
-        try:
-            if selected_provider == "claude":
-                content = self._call_claude(system_prompt, user_prompt, selected_model, temperature=0.1)
-            else:
-                content = self._call_openai_compatible(
-                    provider=selected_provider,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    model=selected_model,
-                    temperature=0.1,
-                )
-        except Exception as exc:
-            self._handle_provider_exception(exc, selected_provider)
+        content = self._call_llm(
+            provider=selected_provider,
+            model=selected_model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.1,
+        )
 
         return self._parse_translate_response(content, target_language)
 
