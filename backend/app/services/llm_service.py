@@ -1,5 +1,6 @@
 import json
 import re
+import unicodedata
 from typing import Literal
 
 from anthropic import Anthropic, AuthenticationError as AnthropicAuthError
@@ -28,6 +29,158 @@ PROVIDER_LABELS = {
     "openai": "OpenAI",
     "groq": "Groq",
     "claude": "Claude (Anthropic)",
+}
+
+_CORE_JOB_MARKERS = (
+    "specification of core function",
+    "core function",
+    "key responsibilities",
+    "responsibilities",
+    "requirements",
+    "qualifications",
+    "profil recherché",
+    "profil recherche",
+    "vos missions",
+    "mission du poste",
+    "mission",
+)
+
+_NOISE_KEYWORDS = frozenset({
+    "geneva",
+    "genève",
+    "zurich",
+    "lausanne",
+    "paris",
+    "london",
+    "location",
+    "switzerland",
+    "accountability",
+    "hands-on",
+    "passionate",
+    "partnership",
+    "teamwork",
+    "networking",
+    "leadership",
+    "communication",
+    "feedback",
+    "coaching",
+    "mindset",
+    "innovation",
+    "creativity",
+    "diversity",
+    "excellence",
+    "negotiation",
+    "entrepreneurial",
+    "integrity",
+    "compliance",
+    "ownership",
+    "proactive",
+    "curious",
+    "availability",
+    "flexibility",
+    "reactivity",
+    "rigor",
+    "methodology",
+    "private banking",
+    "asset management",
+    "employer",
+    "values",
+    "competencies",
+    "purpose",
+    "company",
+    "efg",
+    "2x8",
+    "teams",
+    "operators",
+    "banking",
+    "corporate",
+    "department",
+    "reporting",
+})
+
+_NOISE_SUBSTRINGS = (
+    "mindset",
+    "competenc",
+    "our value",
+    "our company",
+    "client-centric",
+    "growth mindset",
+    "future-oriented",
+    "sustainable performance",
+    "mutual respect",
+    "employer of choice",
+)
+
+# Concepts métier : si le CV contient un marqueur du groupe, le besoin est couvert.
+_SKILL_CONCEPTS: dict[str, dict[str, tuple[str, ...]]] = {
+    "scheduling": {
+        "keyword_triggers": (
+            "scheduler",
+            "planification",
+            "orchestr",
+            "automic",
+            "uc4",
+            "control-m",
+            "control m",
+            "opcon",
+        ),
+        "cv_markers": (
+            "scheduler",
+            "planification",
+            "planifi",
+            "automic",
+            "uc4",
+            "control-m",
+            "controlm",
+            "opcon",
+            "orchestr",
+            "job scheduling",
+        ),
+    },
+    "batches": {
+        "keyword_triggers": ("batch", "batches", "flux"),
+        "cv_markers": ("batch", "batches", "automic", "uc4", "control-m", "scheduler", "flux"),
+    },
+    "alarms": {
+        "keyword_triggers": ("alarm", "alerte"),
+        "cv_markers": ("alarm", "alerte", "alerting", "monitoring", "supervision", "splunk", "dynatrace"),
+    },
+    "hotlines": {
+        "keyword_triggers": ("hotline", "dispatch", "escalade"),
+        "cv_markers": (
+            "hotline",
+            "dispatch",
+            "escalade",
+            "l1",
+            "l2",
+            "niveau 1",
+            "level 1",
+            "astreinte",
+            "on-call",
+            "on call",
+        ),
+    },
+    "it_ops": {
+        "keyword_triggers": (
+            "it operations",
+            "operations it",
+            "opérations it",
+            "exploitation",
+            "support applicatif",
+        ),
+        "cv_markers": (
+            "it operations",
+            "operations it",
+            "exploitation",
+            "support applicatif",
+            "application support",
+            "production applicative",
+            "equipe run",
+            "équipe run",
+            "middleware",
+            "run ",
+        ),
+    },
 }
 
 
@@ -197,15 +350,18 @@ class LLMService:
             "- score: 0-100 realistic match\n"
             "- strengths: CV elements aligned with the job\n"
             "- gaps: genuine missing requirements only\n"
-            "- present_keywords: terms that appear in BOTH the job description AND the CV (max 12)\n"
-            "- missing_keywords: terms that appear in the job description but NOT in the CV (max 12)\n"
+            "- present_keywords: concrete skills/tools/technologies in BOTH core role requirements "
+            "AND the CV (max 10)\n"
+            "- missing_keywords: concrete skills/tools/technologies from CORE ROLE REQUIREMENTS only, "
+            "that are NOT in the CV (max 6)\n"
+            "- IGNORE for keywords: company presentation, values, competency frameworks, locations, "
+            "soft skills, schedules (2x8), generic HR vocabulary\n"
             "- NEVER put a keyword in missing_keywords if it appears anywhere in the CV text\n"
-            "- NEVER put a keyword in missing_keywords if it does NOT appear in the job description\n"
+            "- NEVER put a keyword in missing_keywords if it does NOT appear in core role requirements\n"
             "- NEVER list CV-only skills/tools in missing_keywords\n"
             "- keyword_suggestions: actionable tips to address missing keywords HONESTLY "
-            "(e.g. mention a related project if in CV, or develop the skill — max 6)\n"
-            "- gaps: job requirements from the offer NOT evidenced in the CV (do not invent gaps "
-            "for tools that are already in the CV)\n"
+            "(e.g. mention a related project if in CV, or develop the skill — max 4)\n"
+            "- gaps: 2-4 concrete job requirements from the core function NOT evidenced in the CV\n"
             "- Only list concrete skills, tools, technologies, certifications, or domain terms\n"
             "- Do NOT invent CV content\n\n"
             "Respond ONLY with valid JSON:\n"
@@ -213,9 +369,11 @@ class LLMService:
             '"present_keywords": ["..."], "missing_keywords": ["..."], '
             '"keyword_suggestions": ["..."]}'
         )
+        core_job = self._extract_core_job_text(job_description)
         user_prompt = (
             f"Language for all text fields: {language_label}\n\n"
-            f"## Job Description\n{job_description}\n\n"
+            f"## Core role requirements (USE THIS SECTION FOR KEYWORDS)\n{core_job}\n\n"
+            f"## Full job description (context only)\n{job_description}\n\n"
             f"## CV Content\n{cv_paragraphs}\n\n"
             "Analyze match score and keyword coverage."
         )
@@ -239,7 +397,9 @@ class LLMService:
             raise ValueError(f"{PROVIDER_LABELS[selected_provider]} request failed: {exc}") from exc
 
         result = self._parse_analysis_response(content)
-        return self._sanitize_analysis_keywords(job_description, cv_paragraphs, result)
+        result = self._sanitize_analysis_keywords(job_description, cv_paragraphs, result)
+        result["gaps"] = self._sanitize_gaps(result.get("gaps", []), cv_paragraphs)
+        return result
 
     def generate_application_kit(
         self,
@@ -402,6 +562,71 @@ class LLMService:
         return cleaned, summary
 
     @staticmethod
+    def _extract_core_job_text(job_description: str) -> str:
+        lower = job_description.lower()
+        start = -1
+        for marker in _CORE_JOB_MARKERS:
+            idx = lower.find(marker)
+            if idx >= 0 and (start < 0 or idx < start):
+                start = idx
+        if start >= 0:
+            return job_description[start:].strip()
+        if len(job_description) > 1800:
+            return job_description[-1800:].strip()
+        return job_description.strip()
+
+    @staticmethod
+    def _is_noise_keyword(keyword: str) -> bool:
+        normalized = keyword.strip().lower()
+        if not normalized or len(normalized) <= 3:
+            return True
+        if normalized in _NOISE_KEYWORDS:
+            return True
+        return any(fragment in normalized for fragment in _NOISE_SUBSTRINGS)
+
+    @staticmethod
+    def _normalize_for_match(text: str) -> str:
+        decomposed = unicodedata.normalize("NFD", text.lower())
+        return "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
+
+    @classmethod
+    def _keyword_concept(cls, keyword: str) -> str | None:
+        normalized = cls._normalize_for_match(keyword)
+        for concept, data in _SKILL_CONCEPTS.items():
+            if any(trigger in normalized for trigger in data["keyword_triggers"]):
+                return concept
+        return None
+
+    @classmethod
+    def _cv_has_concept(cls, concept: str, cv_paragraphs: str) -> bool:
+        cv_normalized = cls._normalize_for_match(cv_paragraphs)
+        markers = _SKILL_CONCEPTS.get(concept, {}).get("cv_markers", ())
+        return any(cls._normalize_for_match(marker) in cv_normalized for marker in markers)
+
+    @classmethod
+    def _cv_covers_keyword(cls, keyword: str, cv_paragraphs: str) -> bool:
+        if cls._term_in_text(keyword, cv_paragraphs):
+            return True
+        concept = cls._keyword_concept(keyword)
+        return bool(concept and cls._cv_has_concept(concept, cv_paragraphs))
+
+    @classmethod
+    def _sanitize_gaps(cls, gaps: list[str], cv_paragraphs: str) -> list[str]:
+        filtered: list[str] = []
+        for gap in gaps:
+            gap_normalized = cls._normalize_for_match(gap)
+            skip = False
+            for concept, data in _SKILL_CONCEPTS.items():
+                if not any(trigger in gap_normalized for trigger in data["keyword_triggers"]):
+                    continue
+                if cls._cv_has_concept(concept, cv_paragraphs):
+                    skip = True
+                    break
+            if not skip:
+                filtered.append(gap)
+        return filtered[:4]
+
+    @staticmethod
     def _keyword_search_variants(keyword: str) -> list[str]:
         cleaned = keyword.strip().lower()
         variants = [cleaned] if cleaned else []
@@ -418,8 +643,11 @@ class LLMService:
 
     @classmethod
     def _term_in_text(cls, keyword: str, text: str) -> bool:
-        text_lower = text.lower()
-        return any(variant in text_lower for variant in cls._keyword_search_variants(keyword))
+        text_normalized = cls._normalize_for_match(text)
+        return any(
+            cls._normalize_for_match(variant) in text_normalized
+            for variant in cls._keyword_search_variants(keyword)
+        )
 
     @classmethod
     def _sanitize_analysis_keywords(
@@ -428,33 +656,48 @@ class LLMService:
         cv_paragraphs: str,
         result: dict,
     ) -> dict:
+        core_job = cls._extract_core_job_text(job_description)
         present: list[str] = []
         missing: list[str] = []
         seen: set[str] = set()
+        missing_concepts: set[str] = set()
 
         for keyword in result.get("present_keywords", []):
             key = keyword.strip().lower()
-            if not key or key in seen:
+            if not key or key in seen or cls._is_noise_keyword(keyword):
                 continue
-            if cls._term_in_text(keyword, cv_paragraphs):
+            if not cls._term_in_text(keyword, job_description):
+                continue
+            if cls._cv_covers_keyword(keyword, cv_paragraphs):
                 present.append(keyword)
                 seen.add(key)
 
         for keyword in result.get("missing_keywords", []):
             key = keyword.strip().lower()
-            if not key or key in seen:
+            if not key or key in seen or cls._is_noise_keyword(keyword):
                 continue
-            if not cls._term_in_text(keyword, job_description):
+            if not cls._term_in_text(keyword, core_job):
                 continue
-            if cls._term_in_text(keyword, cv_paragraphs):
-                present.append(keyword)
+
+            concept = cls._keyword_concept(keyword)
+            if concept and concept in missing_concepts:
+                continue
+
+            if cls._cv_covers_keyword(keyword, cv_paragraphs):
+                if not cls._is_noise_keyword(keyword) and cls._term_in_text(keyword, job_description):
+                    present.append(keyword)
                 seen.add(key)
+                if concept:
+                    missing_concepts.add(concept)
                 continue
+
             missing.append(keyword)
             seen.add(key)
+            if concept:
+                missing_concepts.add(concept)
 
-        result["present_keywords"] = present[:12]
-        result["missing_keywords"] = missing[:12]
+        result["present_keywords"] = present[:10]
+        result["missing_keywords"] = missing[:6]
         return result
 
     @staticmethod
