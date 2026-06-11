@@ -94,6 +94,8 @@ async def health() -> HealthResponse:
         default_model=default,
         prompts_loaded=prompt_service.exists(),
         providers=providers_info.providers,
+        cerebras_fallback_enabled=settings.is_cerebras_fallback_available(),
+        groq_in_cooldown=llm_service.is_groq_in_cooldown(),
     )
 
 

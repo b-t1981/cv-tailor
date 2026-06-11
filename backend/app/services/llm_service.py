@@ -1,13 +1,14 @@
 import json
 import logging
 import re
+import time
 import unicodedata
 from typing import Literal
 
 logger = logging.getLogger(__name__)
 
 from anthropic import Anthropic, AuthenticationError as AnthropicAuthError
-from openai import APIStatusError, AuthenticationError, OpenAI
+from openai import APIStatusError, AuthenticationError, OpenAI, RateLimitError
 
 from app.config import LLMProvider, settings
 from app.models.schemas import LLMProviderInfo, LLMProvidersResponse, PromptConfig
@@ -43,6 +44,8 @@ _GROQ_TO_CEREBRAS_MODEL: dict[str, str] = {
     "mixtral-8x7b-32768": "llama-3.3-70b",
     "gemma2-9b-it": "llama3.1-8b",
 }
+
+_groq_cooldown_until: float = 0.0
 
 # Ordre = priorité (le plus spécifique en premier). Pas de "mission" seul (matche "Our Purpose and Mission").
 _CORE_JOB_MARKERS = (
@@ -293,13 +296,45 @@ class LLMService:
 
     @staticmethod
     def _is_rate_limit_error(exc: Exception) -> bool:
+        if isinstance(exc, RateLimitError):
+            return True
+        if isinstance(exc, APIStatusError) and getattr(exc, "status_code", None) == 429:
+            return True
         if getattr(exc, "status_code", None) == 429:
             return True
         msg = str(exc).lower()
-        return "rate_limit_exceeded" in msg or "rate limit" in msg
+        return "rate_limit_exceeded" in msg or "rate limit" in msg or "error code: 429" in msg
+
+    @classmethod
+    def _mark_groq_rate_limited(cls, exc: Exception) -> None:
+        global _groq_cooldown_until
+        wait = cls._extract_retry_seconds(str(exc))
+        _groq_cooldown_until = time.monotonic() + (wait if wait else 3600)
+        logger.warning("Groq rate limit — cooldown %ss", wait or 3600)
+
+    @staticmethod
+    def is_groq_in_cooldown() -> bool:
+        return time.monotonic() < _groq_cooldown_until
 
     def _cerebras_model_for(self, groq_model: str) -> str:
         return _GROQ_TO_CEREBRAS_MODEL.get(groq_model, settings.cerebras_model)
+
+    def _call_cerebras_fallback(
+        self,
+        groq_model: str,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float,
+    ) -> str:
+        fallback_model = self._cerebras_model_for(groq_model)
+        logger.warning("Falling back to Cerebras model %s", fallback_model)
+        return self._call_openai_compatible(
+            provider="cerebras",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=fallback_model,
+            temperature=temperature,
+        )
 
     def _call_llm(
         self,
@@ -309,6 +344,18 @@ class LLMService:
         user_prompt: str,
         temperature: float = 0.1,
     ) -> str:
+        if (
+            provider == "groq"
+            and self.is_groq_in_cooldown()
+            and settings.is_cerebras_fallback_available()
+        ):
+            try:
+                return self._call_cerebras_fallback(
+                    model, system_prompt, user_prompt, temperature
+                )
+            except Exception as fallback_exc:
+                self._handle_provider_exception(fallback_exc, "cerebras")
+
         try:
             if provider == "claude":
                 return self._call_claude(system_prompt, user_prompt, model, temperature=temperature)
@@ -320,26 +367,24 @@ class LLMService:
                 temperature=temperature,
             )
         except Exception as exc:
-            if (
-                provider == "groq"
-                and self._is_rate_limit_error(exc)
-                and settings.is_provider_configured("cerebras")
-            ):
-                fallback_model = self._cerebras_model_for(model)
-                logger.warning(
-                    "Groq rate limit reached, falling back to Cerebras (%s)",
-                    fallback_model,
+            if provider == "groq" and self._is_rate_limit_error(exc):
+                self._mark_groq_rate_limited(exc)
+                if settings.is_cerebras_fallback_available():
+                    try:
+                        return self._call_cerebras_fallback(
+                            model, system_prompt, user_prompt, temperature
+                        )
+                    except Exception as fallback_exc:
+                        self._handle_provider_exception(fallback_exc, "cerebras")
+                logger.error(
+                    "Groq quota reached but CEREBRAS_API_KEY is missing or invalid on the server"
                 )
-                try:
-                    return self._call_openai_compatible(
-                        provider="cerebras",
-                        system_prompt=system_prompt,
-                        user_prompt=user_prompt,
-                        model=fallback_model,
-                        temperature=temperature,
-                    )
-                except Exception as fallback_exc:
-                    self._handle_provider_exception(fallback_exc, "cerebras")
+                wait = self._extract_retry_seconds(str(exc))
+                wait_hint = self._format_wait_hint(wait) if wait else "quelques minutes"
+                raise ValueError(
+                    f"Quota Groq atteint pour aujourd'hui. Réessayez dans {wait_hint}. "
+                    "Repli Cerebras non actif : ajoutez CEREBRAS_API_KEY sur Render."
+                ) from exc
             self._handle_provider_exception(exc, provider)
 
     def list_providers(self) -> LLMProvidersResponse:

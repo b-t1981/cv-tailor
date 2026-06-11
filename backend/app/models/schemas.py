@@ -179,3 +179,5 @@ class HealthResponse(BaseModel):
     default_model: str
     prompts_loaded: bool
     providers: list[LLMProviderInfo]
+    cerebras_fallback_enabled: bool = False
+    groq_in_cooldown: bool = False

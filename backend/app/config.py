@@ -2,6 +2,7 @@ import secrets
 from pathlib import Path
 from typing import Literal
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LLMProvider = Literal["openai", "groq", "claude"]
@@ -17,7 +18,10 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
-    cerebras_api_key: str = ""
+    cerebras_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("CEREBRAS_API_KEY", "CEREBAS_API_KEY"),
+    )
     cerebras_model: str = "llama-3.3-70b"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
@@ -116,6 +120,9 @@ class Settings(BaseSettings):
             return False
         lowered = key.lower()
         return not any(marker in lowered for marker in ("your-deepl", "changeme", "example", "placeholder"))
+
+    def is_cerebras_fallback_available(self) -> bool:
+        return self.is_provider_configured("cerebras")
 
     def is_provider_configured(self, provider: str) -> bool:
         keys = {
