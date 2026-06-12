@@ -60,6 +60,10 @@ class JobAnalysisResponse(BaseModel):
     writing_summary: str = ""
     writing_strengths: list[str] = Field(default_factory=list)
     writing_improvements: list[str] = Field(default_factory=list)
+    profile_confidence: str = Field(default="moderate", pattern="^(high|moderate|low)$")
+    cv_confidence: str = Field(default="moderate", pattern="^(high|moderate|low)$")
+    confidence_reason: str = ""
+    role_content_ratio: int = Field(default=50, ge=0, le=100)
 
 
 class ApplyModificationsRequest(BaseModel):
@@ -73,6 +77,23 @@ class ApplyModificationsResponse(BaseModel):
     tailored_paragraphs: list[ParagraphInfo]
 
 
+class AnalysisGuidance(BaseModel):
+    """Recommendations from /api/analyze to apply during tailoring."""
+
+    writing_improvements: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    missing_keywords: list[str] = Field(default_factory=list)
+    keyword_suggestions: list[str] = Field(default_factory=list)
+
+    def has_content(self) -> bool:
+        return bool(
+            self.writing_improvements
+            or self.gaps
+            or self.missing_keywords
+            or self.keyword_suggestions
+        )
+
+
 class TailorRequest(BaseModel):
     job_description: str = Field(..., min_length=20)
     output_language: str = Field(default="fr", pattern="^(fr|en)$")
@@ -81,6 +102,7 @@ class TailorRequest(BaseModel):
     tailor_intensity: str = Field(default="strong", pattern="^(light|strong|ats)$")
     custom_system_prompt: str | None = None
     custom_user_prompt: str | None = None
+    analysis_guidance: AnalysisGuidance | None = None
 
 
 class CoverLetterExportRequest(BaseModel):
@@ -116,6 +138,7 @@ class RetryModificationsRequest(BaseModel):
     tailor_intensity: str = Field(default="strong", pattern="^(light|strong|ats)$")
     rejected_block_ids: list[str] = Field(..., min_length=1)
     kept_modifications: dict[str, str] = Field(default_factory=dict)
+    analysis_guidance: AnalysisGuidance | None = None
 
 
 class RetryModificationsResponse(BaseModel):

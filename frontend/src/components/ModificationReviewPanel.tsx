@@ -6,6 +6,7 @@ import type { LLMProviderId } from "@/lib/types";
 import {
   applyModifications,
   retryModifications,
+  type AnalysisGuidance,
   type CVParagraph,
   type TailorIntensity,
 } from "@/lib/api";
@@ -18,6 +19,7 @@ interface ModificationReviewPanelProps {
   llmProvider: LLMProviderId;
   llmModel: string;
   tailorIntensity: TailorIntensity;
+  analysisGuidance?: AnalysisGuidance | null;
   onAcceptedChange: (accepted: Record<string, string>) => void;
   onExportReady: (urls: { downloadUrl: string; downloadUrlPdf?: string | null }) => void;
   onModificationsUpdate: (mods: Record<string, string>, tailored: CVParagraph[]) => void;
@@ -31,6 +33,7 @@ export function ModificationReviewPanel({
   llmProvider,
   llmModel,
   tailorIntensity,
+  analysisGuidance,
   onAcceptedChange,
   onExportReady,
   onModificationsUpdate,
@@ -139,6 +142,7 @@ export function ModificationReviewPanel({
         tailorIntensity,
         rejectedBlockIds: rejected,
         keptModifications: kept,
+        analysisGuidance,
       });
       const merged = result.modified_paragraphs;
       setEditedTexts(merged);

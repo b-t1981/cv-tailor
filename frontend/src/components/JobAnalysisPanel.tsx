@@ -1,7 +1,8 @@
 "use client";
 
 import { useI18n } from "@/i18n/context";
-import type { JobAnalysisResult } from "@/lib/api";
+import type { TranslationKey } from "@/i18n/translations";
+import type { ConfidenceLevel, JobAnalysisResult } from "@/lib/api";
 
 interface JobAnalysisPanelProps {
   analysis: JobAnalysisResult | null;
@@ -27,14 +28,46 @@ function scoreBg(score: number): string {
   return "bg-red-500";
 }
 
+function confidenceBadgeClass(level: ConfidenceLevel): string {
+  if (level === "high") return "bg-green-100 text-green-800";
+  if (level === "low") return "bg-red-100 text-red-800";
+  return "bg-amber-100 text-amber-900";
+}
+
+function confidenceLabel(level: ConfidenceLevel, t: (key: TranslationKey) => string): string {
+  if (level === "high") return t("confidenceHigh");
+  if (level === "low") return t("confidenceLow");
+  return t("confidenceModerate");
+}
+
+function ConfidenceBadge({
+  level,
+  t,
+}: {
+  level: ConfidenceLevel;
+  t: (key: TranslationKey) => string;
+}) {
+  return (
+    <span
+      className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${confidenceBadgeClass(level)}`}
+    >
+      {confidenceLabel(level, t)}
+    </span>
+  );
+}
+
 function ScoreHeader({
   score,
   title,
   subtitle,
+  confidence,
+  confidenceT,
 }: {
   score: number;
   title: string;
   subtitle: string;
+  confidence?: ConfidenceLevel;
+  confidenceT?: (key: TranslationKey) => string;
 }) {
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center">
@@ -45,7 +78,10 @@ function ScoreHeader({
           {score}%
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-slate-900">{title}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-slate-900">{title}</p>
+            {confidence && confidenceT && <ConfidenceBadge level={confidence} t={confidenceT} />}
+          </div>
           <p className="text-xs text-slate-500">{subtitle}</p>
         </div>
       </div>
@@ -127,11 +163,31 @@ export function JobAnalysisPanel({
 
       {analysis && !loading && (
         <div className="space-y-4">
+          {(analysis.confidence_reason || analysis.profile_confidence === "low") && (
+            <div
+              className={`rounded-lg border px-4 py-3 text-sm ${
+                (analysis.profile_confidence ?? "moderate") === "low"
+                  ? "border-amber-200 bg-amber-50 text-amber-950"
+                  : "border-slate-200 bg-slate-50 text-slate-700"
+              }`}
+            >
+              {analysis.confidence_reason && <p>{analysis.confidence_reason}</p>}
+              {(analysis.role_content_ratio ?? 0) > 0 &&
+                (analysis.profile_confidence ?? "moderate") !== "high" && (
+                <p className="mt-1.5 text-xs opacity-80">
+                  {t("confidenceRoleShare")} : ~{analysis.role_content_ratio}%
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
             <ScoreHeader
               score={analysis.score}
               title={t("matchTitle")}
               subtitle={t("matchSubtitle")}
+              confidence={analysis.profile_confidence ?? "moderate"}
+              confidenceT={t}
             />
 
             {(scoreBefore != null || scoreAfter != null) && (
@@ -246,6 +302,8 @@ export function JobAnalysisPanel({
                 score={analysis.writing_score}
                 title={t("writingTitle")}
                 subtitle={t("writingSubtitle")}
+                confidence={analysis.cv_confidence ?? "moderate"}
+                confidenceT={t}
               />
 
               {analysis.writing_summary && (

@@ -1,3 +1,4 @@
+import json
 import shutil
 import uuid
 from pathlib import Path
@@ -7,6 +8,7 @@ from fastapi.responses import FileResponse
 
 from app.config import settings
 from app.models.schemas import (
+    AnalysisGuidance,
     ApplicationKitRequest,
     ApplicationKitResponse,
     ApplyModificationsRequest,
@@ -42,6 +44,15 @@ from app.session import get_session_id
 router = APIRouter()
 
 ALLOWED_EXTENSIONS = {".docx", ".pdf"}
+
+
+def _parse_analysis_guidance(raw: str | None) -> AnalysisGuidance | None:
+    if not raw or not raw.strip():
+        return None
+    try:
+        return AnalysisGuidance.model_validate(json.loads(raw))
+    except (json.JSONDecodeError, ValueError):
+        return None
 
 
 def _safe_upload_name(filename: str) -> str:
@@ -214,6 +225,7 @@ async def retry_tailor_modifications(
             llm_provider=payload.llm_provider,
             llm_model=payload.llm_model,
             tailor_intensity=payload.tailor_intensity,
+            analysis_guidance=payload.analysis_guidance,
         )
         result = cv_tailor_service.retry_rejected(
             session_id,
@@ -336,6 +348,7 @@ async def tailor_cv(
     tailor_intensity: str = Form(default="strong"),
     custom_system_prompt: str | None = Form(default=None),
     custom_user_prompt: str | None = Form(default=None),
+    analysis_guidance: str | None = Form(default=None),
 ) -> TailorResponse:
     if not file or not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
@@ -377,6 +390,7 @@ async def tailor_cv(
             tailor_intensity=tailor_intensity,
             custom_system_prompt=custom_system_prompt or None,
             custom_user_prompt=custom_user_prompt or None,
+            analysis_guidance=_parse_analysis_guidance(analysis_guidance),
         )
 
         result = cv_tailor_service.process(

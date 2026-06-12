@@ -20,6 +20,7 @@ import {
   fetchPrompts,
   previewCV,
   tailorCV,
+  toAnalysisGuidance,
   translateCV,
   type CVParagraph,
   type JobAnalysisResult,
@@ -322,6 +323,23 @@ export default function HomePage() {
     setResult(null);
     setExportUrls(null);
     try {
+      let guidance = analysis;
+      if (!guidance) {
+        try {
+          guidance = await analyzeJob({
+            jobDescription,
+            outputLanguage,
+            llmProvider,
+            llmModel,
+            paragraphs: originalParagraphs,
+          });
+          setAnalysis(guidance);
+          setScoreBefore(guidance.score);
+        } catch {
+          /* tailor without prior analysis */
+        }
+      }
+
       const response = await tailorCV({
         file,
         jobDescription,
@@ -331,6 +349,7 @@ export default function HomePage() {
         tailorIntensity,
         customSystemPrompt: prompts.system_prompt,
         customUserPrompt: prompts.user_prompt,
+        analysisGuidance: guidance ? toAnalysisGuidance(guidance) : undefined,
       });
       setResult(response);
       setTimeout(() => {
@@ -508,6 +527,7 @@ export default function HomePage() {
               llmProvider={llmProvider}
               llmModel={llmModel}
               tailorIntensity={tailorIntensity}
+              analysisGuidance={analysis ? toAnalysisGuidance(analysis) : null}
               onAcceptedChange={handleAcceptedChange}
               onExportReady={handleExportReady}
               onModificationsUpdate={handleModificationsUpdate}

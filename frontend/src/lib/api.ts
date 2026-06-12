@@ -126,6 +126,8 @@ export interface MatchScoreResult {
   gaps: string[];
 }
 
+export type ConfidenceLevel = "high" | "moderate" | "low";
+
 export interface JobAnalysisResult extends MatchScoreResult {
   present_keywords: string[];
   missing_keywords: string[];
@@ -134,6 +136,26 @@ export interface JobAnalysisResult extends MatchScoreResult {
   writing_summary: string;
   writing_strengths: string[];
   writing_improvements: string[];
+  profile_confidence: ConfidenceLevel;
+  cv_confidence: ConfidenceLevel;
+  confidence_reason: string;
+  role_content_ratio: number;
+}
+
+export interface AnalysisGuidance {
+  writing_improvements?: string[];
+  gaps?: string[];
+  missing_keywords?: string[];
+  keyword_suggestions?: string[];
+}
+
+export function toAnalysisGuidance(analysis: JobAnalysisResult): AnalysisGuidance {
+  return {
+    writing_improvements: analysis.writing_improvements,
+    gaps: analysis.gaps,
+    missing_keywords: analysis.missing_keywords,
+    keyword_suggestions: analysis.keyword_suggestions,
+  };
 }
 
 export interface ApplyModificationsResult {
@@ -330,6 +352,7 @@ export async function retryModifications(params: {
   tailorIntensity: TailorIntensity;
   rejectedBlockIds: string[];
   keptModifications: Record<string, string>;
+  analysisGuidance?: AnalysisGuidance | null;
 }): Promise<RetryModificationsResult> {
   const response = await apiFetch(apiUrl("tailor/retry"), {
     method: "POST",
@@ -342,6 +365,7 @@ export async function retryModifications(params: {
       tailor_intensity: params.tailorIntensity,
       rejected_block_ids: params.rejectedBlockIds,
       kept_modifications: params.keptModifications,
+      analysis_guidance: params.analysisGuidance ?? undefined,
     }),
   });
 
@@ -432,6 +456,7 @@ export async function tailorCV(params: {
   tailorIntensity?: TailorIntensity;
   customSystemPrompt?: string;
   customUserPrompt?: string;
+  analysisGuidance?: AnalysisGuidance | null;
 }): Promise<TailorResult> {
   const formData = new FormData();
   if (params.file) {
@@ -448,6 +473,9 @@ export async function tailorCV(params: {
   }
   if (params.customUserPrompt) {
     formData.append("custom_user_prompt", params.customUserPrompt);
+  }
+  if (params.analysisGuidance) {
+    formData.append("analysis_guidance", JSON.stringify(params.analysisGuidance));
   }
 
   const response = await apiFetch(apiUrl("tailor"), {

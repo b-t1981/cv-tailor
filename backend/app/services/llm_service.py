@@ -565,6 +565,19 @@ class LLMService:
             "You are an expert recruiter and CV writing coach. Evaluate the CV against the job "
             "description in TWO separate dimensions.\n"
             "Read the ENTIRE CV before answering.\n\n"
+            "PART 0 — JOB DESCRIPTION QUALITY (before scoring):\n"
+            "Assess how much usable ROLE information is in the posting (not company culture fluff).\n"
+            "- role_content_ratio: 0-100 estimated % of the text that describes the actual role "
+            "(missions, skills, responsibilities) vs company presentation/values/benefits\n"
+            "- profile_confidence: high | moderate | low — how reliable a PROFILE fit score can be "
+            "given posting length and signal-to-noise\n"
+            "- cv_confidence: high | moderate | low — how reliably you can judge CV writing FOR this "
+            "job (CV assessment is less sensitive to noise than profile/keywords)\n"
+            "- confidence_reason: 1-2 sentences in the output language explaining the confidence level "
+            "(e.g. short posting, mostly corporate text, clear requirements section)\n"
+            "Guidelines: <100 chars or almost no requirements → profile_confidence low; "
+            "500 lines but 90% company culture → profile_confidence low/moderate, low role_content_ratio; "
+            "focused 50-line spec with clear skills → profile_confidence high.\n\n"
             "PART 1 — JOB FIT (content match):\n"
             "- score: 0-100 realistic match between CV experience/skills and job requirements\n"
             "- summary: brief fit assessment\n"
@@ -596,7 +609,9 @@ class LLMService:
             '"present_keywords": ["..."], "missing_keywords": ["..."], '
             '"keyword_suggestions": ["..."], '
             '"writing_score": 65, "writing_summary": "...", '
-            '"writing_strengths": ["..."], "writing_improvements": ["..."]}'
+            '"writing_strengths": ["..."], "writing_improvements": ["..."], '
+            '"role_content_ratio": 45, "profile_confidence": "moderate", '
+            '"cv_confidence": "high", "confidence_reason": "..."}'
         )
         core_job = self._extract_core_job_text(job_description)
         user_prompt = (
@@ -617,7 +632,10 @@ class LLMService:
         result = self._parse_analysis_response(content)
         result = self._sanitize_analysis_keywords(job_description, cv_paragraphs, result)
         result["gaps"] = self._sanitize_gaps(result.get("gaps", []), cv_paragraphs)
-        return result
+
+        from app.services.job_description_confidence import apply_analysis_confidence
+
+        return apply_analysis_confidence(result, job_description, output_language)
 
     def generate_application_kit(
         self,
@@ -989,6 +1007,10 @@ class LLMService:
             "writing_improvements": [
                 str(item) for item in data.get("writing_improvements", []) if item
             ],
+            "profile_confidence": str(data.get("profile_confidence", "moderate")),
+            "cv_confidence": str(data.get("cv_confidence", "moderate")),
+            "confidence_reason": str(data.get("confidence_reason", "")),
+            "role_content_ratio": max(0, min(100, int(data.get("role_content_ratio", 50)))),
         }
 
     @staticmethod

@@ -18,6 +18,7 @@ from app.services.llm_service import llm_service
 from app.services.modification_sanitizer import sanitize_modifications
 from app.services.pdf_exporter import export_docx_to_pdf
 from app.services.prompt_service import prompt_service
+from app.services.analysis_guidance import build_analysis_guidance_suffix
 from app.services.tailor_intensity import get_intensity_profile
 
 
@@ -101,7 +102,10 @@ class CVTailorService:
         if request.custom_user_prompt:
             prompts.user_prompt = request.custom_user_prompt
 
-        prompts.user_prompt = prompts.user_prompt + profile.user_prompt_suffix + extra_user_suffix
+        guidance_suffix = build_analysis_guidance_suffix(request.analysis_guidance)
+        prompts.user_prompt = (
+            prompts.user_prompt + profile.user_prompt_suffix + guidance_suffix + extra_user_suffix
+        )
 
         if block_filter:
             filtered_lines = [
