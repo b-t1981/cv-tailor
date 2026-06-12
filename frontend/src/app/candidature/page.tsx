@@ -4,7 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { BackendConnectionBanner } from "@/components/BackendConnectionBanner";
 import { CopyButton } from "@/components/CopyButton";
-import { LLMSelector, type LLMProviderId } from "@/components/LLMSelector";
+import { CollapsibleCard } from "@/components/CollapsibleCard";
+import { LLMSelector } from "@/components/LLMSelector";
+import { OutputLanguagePicker } from "@/components/OutputLanguagePicker";
+import { StickyPrimaryAction } from "@/components/StickyPrimaryAction";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { loadCvForApplication } from "@/lib/history";
 import { useI18n } from "@/i18n/context";
@@ -15,8 +18,8 @@ import {
   type ApplicationKitResult,
   type CVParagraph,
 } from "@/lib/api";
-
-const JOB_STORAGE_KEY = "cv-tailor-job-description";
+import { JOB_STORAGE_KEY } from "@/lib/constants";
+import type { LLMProviderId } from "@/lib/types";
 
 export default function ApplicationPage() {
   const { t } = useI18n();
@@ -201,7 +204,7 @@ export default function ApplicationPage() {
             <div>
               <label className="label">{t("applicationTone")}</label>
               <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:gap-3">
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm sm:min-h-0">
                   <input
                     type="radio"
                     checked={tone === "professional"}
@@ -210,7 +213,7 @@ export default function ApplicationPage() {
                   />
                   {t("applicationToneProfessional")}
                 </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm sm:min-h-0">
                   <input
                     type="radio"
                     checked={tone === "friendly"}
@@ -235,30 +238,17 @@ export default function ApplicationPage() {
               rows={8}
               className="input-field"
             />
+            <p
+              className={`mt-1 text-right text-xs ${
+                jobDescription.trim().length >= 20 ? "text-slate-500" : "text-amber-600"
+              }`}
+            >
+              {jobDescription.length} {t("jobCharCount")}
+            </p>
           </div>
 
           <div className="mt-4">
-            <label className="label">{t("outputLang")}</label>
-            <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
-              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm sm:min-h-0">
-                <input
-                  type="radio"
-                  checked={outputLanguage === "fr"}
-                  onChange={() => setOutputLanguage("fr")}
-                  className="text-brand-600"
-                />
-                {t("french")}
-              </label>
-              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm sm:min-h-0">
-                <input
-                  type="radio"
-                  checked={outputLanguage === "en"}
-                  onChange={() => setOutputLanguage("en")}
-                  className="text-brand-600"
-                />
-                {t("english")}
-              </label>
-            </div>
+            <OutputLanguagePicker value={outputLanguage} onChange={setOutputLanguage} />
           </div>
 
           <LLMSelector
@@ -273,13 +263,7 @@ export default function ApplicationPage() {
           />
         </div>
 
-        <div
-          className={
-            result
-              ? "flex justify-center"
-              : "sticky bottom-0 z-40 -mx-3 border-t border-slate-200/80 bg-gradient-to-t from-slate-100 via-slate-100/95 to-transparent px-3 py-3 safe-bottom sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0"
-          }
-        >
+        <StickyPrimaryAction>
           <button
             type="button"
             onClick={handleGenerate}
@@ -288,7 +272,7 @@ export default function ApplicationPage() {
           >
             {loading ? t("applicationGenerating") : t("applicationGenerateBtn")}
           </button>
-        </div>
+        </StickyPrimaryAction>
 
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -304,10 +288,11 @@ export default function ApplicationPage() {
               </div>
             )}
 
-            <section className="card">
-              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                <h3 className="text-base font-semibold text-slate-900 sm:text-lg">{t("applicationCoverLetter")}</h3>
-                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
+            <CollapsibleCard
+              title={t("applicationCoverLetter")}
+              defaultOpen
+              actions={
+                <>
                   <button
                     type="button"
                     onClick={handleExportCoverLetter}
@@ -326,47 +311,44 @@ export default function ApplicationPage() {
                     </a>
                   )}
                   <CopyButton text={result.cover_letter} />
-                </div>
-              </div>
+                </>
+              }
+            >
               <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-800 sm:p-4">
                 {result.cover_letter}
               </pre>
-            </section>
+            </CollapsibleCard>
 
-            <section className="card">
-              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <h3 className="text-base font-semibold text-slate-900 sm:text-lg">{t("applicationEmailSubject")}</h3>
-                <CopyButton text={result.email_subject} />
-              </div>
+            <CollapsibleCard
+              title={t("applicationEmailSubject")}
+              actions={<CopyButton text={result.email_subject} />}
+            >
               <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-800">{result.email_subject}</p>
-            </section>
+            </CollapsibleCard>
 
-            <section className="card">
-              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <h3 className="text-base font-semibold text-slate-900 sm:text-lg">{t("applicationRecruiterMessage")}</h3>
-                <CopyButton text={result.recruiter_message} />
-              </div>
+            <CollapsibleCard
+              title={t("applicationRecruiterMessage")}
+              actions={<CopyButton text={result.recruiter_message} />}
+            >
               <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-800 sm:p-4">
                 {result.recruiter_message}
               </pre>
-            </section>
+            </CollapsibleCard>
 
-            <section className="card">
-              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <h3 className="text-base font-semibold text-slate-900 sm:text-lg">{t("applicationLinkedinMessage")}</h3>
-                <CopyButton text={result.linkedin_message} />
-              </div>
+            <CollapsibleCard
+              title={t("applicationLinkedinMessage")}
+              actions={<CopyButton text={result.linkedin_message} />}
+            >
               <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-800 sm:p-4">
                 {result.linkedin_message}
               </pre>
               <p className="mt-2 text-xs text-slate-500">
                 {result.linkedin_message.length} {t("applicationChars")}
               </p>
-            </section>
+            </CollapsibleCard>
 
-            <div className="grid gap-6 lg:grid-cols-2">
-              <section className="card">
-                <h3 className="mb-3 text-lg font-semibold text-slate-900">{t("applicationTips")}</h3>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <CollapsibleCard title={t("applicationTips")}>
                 <ul className="space-y-2">
                   {result.application_tips.map((tip, index) => (
                     <li key={index} className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
@@ -374,10 +356,9 @@ export default function ApplicationPage() {
                     </li>
                   ))}
                 </ul>
-              </section>
+              </CollapsibleCard>
 
-              <section className="card">
-                <h3 className="mb-3 text-lg font-semibold text-slate-900">{t("applicationChecklist")}</h3>
+              <CollapsibleCard title={t("applicationChecklist")}>
                 <ul className="space-y-2">
                   {result.checklist.map((item, index) => (
                     <li
@@ -389,7 +370,7 @@ export default function ApplicationPage() {
                     </li>
                   ))}
                 </ul>
-              </section>
+              </CollapsibleCard>
             </div>
           </div>
         )}

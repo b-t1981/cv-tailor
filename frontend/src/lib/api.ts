@@ -130,6 +130,10 @@ export interface JobAnalysisResult extends MatchScoreResult {
   present_keywords: string[];
   missing_keywords: string[];
   keyword_suggestions: string[];
+  writing_score: number;
+  writing_summary: string;
+  writing_strengths: string[];
+  writing_improvements: string[];
 }
 
 export interface ApplyModificationsResult {
@@ -359,32 +363,6 @@ export async function applyModifications(
 
   if (!response.ok) {
     throw new Error(await readApiError(response, "Apply modifications failed"));
-  }
-
-  return response.json();
-}
-
-export async function computeMatchScore(params: {
-  jobDescription: string;
-  outputLanguage: "fr" | "en";
-  llmProvider: "openai" | "groq" | "claude";
-  llmModel: string;
-  paragraphs?: CVParagraph[];
-}): Promise<MatchScoreResult> {
-  const response = await apiFetch(apiUrl("match"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      job_description: params.jobDescription,
-      output_language: params.outputLanguage,
-      llm_provider: params.llmProvider,
-      llm_model: params.llmModel,
-      paragraphs: params.paragraphs,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response, "Match failed"));
   }
 
   return response.json();

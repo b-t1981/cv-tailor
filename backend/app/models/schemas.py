@@ -56,6 +56,10 @@ class JobAnalysisResponse(BaseModel):
     present_keywords: list[str]
     missing_keywords: list[str]
     keyword_suggestions: list[str] = Field(default_factory=list)
+    writing_score: int = Field(default=0, ge=0, le=100)
+    writing_summary: str = ""
+    writing_strengths: list[str] = Field(default_factory=list)
+    writing_improvements: list[str] = Field(default_factory=list)
 
 
 class ApplyModificationsRequest(BaseModel):

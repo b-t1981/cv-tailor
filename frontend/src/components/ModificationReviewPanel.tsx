@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useI18n } from "@/i18n/context";
-import { type LLMProviderId } from "@/components/LLMSelector";
+import type { LLMProviderId } from "@/lib/types";
 import {
   applyModifications,
   retryModifications,

@@ -37,6 +37,11 @@ export function saveHistoryEntry(entry: ApplicationHistoryEntry): void {
   localStorage.setItem(HISTORY_KEY, JSON.stringify(items));
 }
 
+export function updateHistoryEntry(id: string, patch: Partial<ApplicationHistoryEntry>): void {
+  const items = loadHistory().map((item) => (item.id === id ? { ...item, ...patch } : item));
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(items));
+}
+
 export function saveAdaptedCv(paragraphs: CVParagraph[], filename: string): void {
   localStorage.setItem(
     ADAPTED_CV_KEY,

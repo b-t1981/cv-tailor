@@ -7,7 +7,9 @@ import { ApplicationHistoryPanel } from "@/components/ApplicationHistoryPanel";
 import { CVCompareView } from "@/components/CVCompareView";
 import { FileUpload } from "@/components/FileUpload";
 import { JobAnalysisPanel } from "@/components/JobAnalysisPanel";
-import { LLMSelector, type LLMProviderId } from "@/components/LLMSelector";
+import { LLMSelector } from "@/components/LLMSelector";
+import { OutputLanguagePicker } from "@/components/OutputLanguagePicker";
+import { StickyPrimaryAction } from "@/components/StickyPrimaryAction";
 import { ModificationReviewPanel } from "@/components/ModificationReviewPanel";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { PromptEditor } from "@/components/PromptEditor";
@@ -25,9 +27,9 @@ import {
   type TailorIntensity,
   type TailorResult,
 } from "@/lib/api";
-import { saveAdaptedCv, saveHistoryEntry, savePreviewCv } from "@/lib/history";
-
-const JOB_STORAGE_KEY = "cv-tailor-job-description";
+import { JOB_STORAGE_KEY } from "@/lib/constants";
+import { saveAdaptedCv, saveHistoryEntry, savePreviewCv, updateHistoryEntry } from "@/lib/history";
+import type { LLMProviderId } from "@/lib/types";
 
 export default function HomePage() {
   const { t } = useI18n();
@@ -112,9 +114,6 @@ export default function HomePage() {
     setPreviewFilename(fname);
     if (preview.paragraphs.length > 0) {
       savePreviewCv(preview.paragraphs, fname || "cv.docx");
-      setTimeout(() => {
-        document.getElementById("cv-compare-section")?.scrollIntoView({ behavior: "smooth" });
-      }, 200);
     }
     return preview;
   }, []);
@@ -202,29 +201,6 @@ export default function HomePage() {
     };
   }, [languageTouched, outputLanguage, baseParagraphs, cvSourceLanguage, llmProvider, llmModel, t]);
 
-  useEffect(() => {
-    if (
-      previewLoading ||
-      translationLoading ||
-      originalParagraphs.length === 0 ||
-      jobDescription.trim().length < 20 ||
-      !hasLlmConfigured
-    ) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      void handleAnalyze();
-    }, 700);
-    return () => window.clearTimeout(timer);
-  }, [
-    jobDescription,
-    originalParagraphs,
-    hasLlmConfigured,
-    previewLoading,
-    translationLoading,
-    handleAnalyze,
-  ]);
-
   const handleAcceptedChange = useCallback((accepted: Record<string, string>) => {
     setAcceptedModifications(accepted);
     setExportUrls(null);
@@ -275,6 +251,7 @@ export default function HomePage() {
         });
         setScoreAfter(after.score);
         setAnalysis(after);
+        updateHistoryEntry(result.job_id, { scoreAfter: after.score });
       } catch {
         /* optional */
       }
@@ -404,12 +381,6 @@ export default function HomePage() {
             )}
           </div>
         )}
-        {error && previewLoading === false && file && originalParagraphs.length === 0 && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-
         <div className="card">
           <h2 className="mb-1 text-lg font-semibold text-slate-900">{t("jobTitle")}</h2>
           <textarea
@@ -446,7 +417,7 @@ export default function HomePage() {
               {(["light", "strong", "ats"] as const).map((mode) => (
                 <label
                   key={mode}
-                  className={`flex cursor-pointer flex-col rounded-lg border px-3 py-2.5 text-sm transition ${
+                  className={`flex min-h-[44px] cursor-pointer flex-col rounded-lg border px-3 py-2.5 text-sm transition sm:min-h-0 ${
                     tailorIntensity === mode
                       ? "border-brand-500 bg-brand-50"
                       : "border-slate-300 hover:border-brand-300"
@@ -483,33 +454,12 @@ export default function HomePage() {
           </div>
 
           <div className="mt-4">
-            <label className="label">{t("outputLang")}</label>
-            <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
-              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm sm:min-h-0">
-                <input
-                  type="radio"
-                  checked={outputLanguage === "fr"}
-                  onChange={() => handleOutputLanguageChange("fr")}
-                  className="text-brand-600"
-                />
-                {t("french")}
-              </label>
-              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm sm:min-h-0">
-                <input
-                  type="radio"
-                  checked={outputLanguage === "en"}
-                  onChange={() => handleOutputLanguageChange("en")}
-                  className="text-brand-600"
-                />
-                {t("english")}
-              </label>
-            </div>
-            {translationLoading && (
-              <p className="mt-2 text-xs text-brand-700">{t("cvTranslateLoading")}</p>
-            )}
-            {translationError && (
-              <p className="mt-2 text-xs text-red-600">{translationError}</p>
-            )}
+            <OutputLanguagePicker
+              value={outputLanguage}
+              onChange={handleOutputLanguageChange}
+              loading={translationLoading}
+              error={translationError}
+            />
           </div>
 
           <LLMSelector
@@ -531,13 +481,7 @@ export default function HomePage() {
 
         <PromptEditor systemPrompt={prompts.system_prompt} userPrompt={prompts.user_prompt} onChange={setPrompts} defaultOpen={false} />
 
-        <div
-          className={
-            result
-              ? "flex justify-center"
-              : "sticky bottom-0 z-40 -mx-3 border-t border-slate-200/80 bg-gradient-to-t from-slate-100 via-slate-100/95 to-transparent px-3 py-3 safe-bottom sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0"
-          }
-        >
+        <StickyPrimaryAction>
           <button
             type="button"
             onClick={handleTailor}
@@ -546,7 +490,7 @@ export default function HomePage() {
           >
             {loading ? t("processing") : t("tailorBtn")}
           </button>
-        </div>
+        </StickyPrimaryAction>
 
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
@@ -572,7 +516,7 @@ export default function HomePage() {
         )}
 
         <div id="cv-compare-section">
-          {hasCv && !previewLoading && (
+          {result && !previewLoading && (
             <CVCompareView
               originalParagraphs={compareOriginal}
               tailoredParagraphs={displayTailoredParagraphs}

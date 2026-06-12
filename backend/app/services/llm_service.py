@@ -562,12 +562,14 @@ class LLMService:
 
         language_label = "French" if output_language == "fr" else "English"
         system_prompt = (
-            "You are an expert recruiter and ATS analyst. Evaluate CV vs job description.\n"
+            "You are an expert recruiter and CV writing coach. Evaluate the CV against the job "
+            "description in TWO separate dimensions.\n"
             "Read the ENTIRE CV before answering.\n\n"
-            "RULES:\n"
-            "- score: 0-100 realistic match\n"
+            "PART 1 — JOB FIT (content match):\n"
+            "- score: 0-100 realistic match between CV experience/skills and job requirements\n"
+            "- summary: brief fit assessment\n"
             "- strengths: CV elements aligned with the job\n"
-            "- gaps: genuine missing requirements only\n"
+            "- gaps: genuine missing requirements only (2-4 items)\n"
             "- present_keywords: concrete skills/tools/technologies in BOTH core role requirements "
             "AND the CV (max 10)\n"
             "- missing_keywords: concrete skills/tools/technologies from CORE ROLE REQUIREMENTS only, "
@@ -577,16 +579,24 @@ class LLMService:
             "- NEVER put a keyword in missing_keywords if it appears anywhere in the CV text\n"
             "- NEVER put a keyword in missing_keywords if it does NOT appear in core role requirements\n"
             "- NEVER list CV-only skills/tools in missing_keywords\n"
-            "- NEVER invent tools (Jira, ServiceNow, Pentaho, Automic…) unless they appear "
-            "verbatim in core role requirements\n"
-            "- keyword_suggestions: only for validated missing_keywords (max 4)\n"
-            "- gaps: 2-4 concrete job requirements from the core function NOT evidenced in the CV\n"
-            "- Only list concrete skills, tools, technologies, certifications, or domain terms\n"
-            "- Do NOT invent CV content\n\n"
+            "- NEVER invent tools unless they appear verbatim in core role requirements\n"
+            "- keyword_suggestions: only for validated missing_keywords (max 4)\n\n"
+            "PART 2 — WRITING QUALITY FOR THIS JOB (before any CV rewrite):\n"
+            "Evaluate how well the CV is WRITTEN and POSITIONED for this specific posting.\n"
+            "Focus on: clarity, structure, professional tone, bullet quality, action verbs, "
+            "relevance of formulations to the target role, redundancy, vague wording.\n"
+            "Do NOT suggest rewritten sentences — only diagnose.\n"
+            "- writing_score: 0-100 how well the current CV reads for this job\n"
+            "- writing_summary: 2-3 sentences on overall writing quality for this posting\n"
+            "- writing_strengths: what is already well written for this job (max 4)\n"
+            "- writing_improvements: concrete writing issues to fix before adapting (max 5)\n\n"
+            "Do NOT invent CV content.\n\n"
             "Respond ONLY with valid JSON:\n"
             '{"score": 72, "summary": "...", "strengths": ["..."], "gaps": ["..."], '
             '"present_keywords": ["..."], "missing_keywords": ["..."], '
-            '"keyword_suggestions": ["..."]}'
+            '"keyword_suggestions": ["..."], '
+            '"writing_score": 65, "writing_summary": "...", '
+            '"writing_strengths": ["..."], "writing_improvements": ["..."]}'
         )
         core_job = self._extract_core_job_text(job_description)
         user_prompt = (
@@ -959,6 +969,8 @@ class LLMService:
 
         score = int(data.get("score", 0))
         score = max(0, min(100, score))
+        writing_score = int(data.get("writing_score", 0))
+        writing_score = max(0, min(100, writing_score))
         return {
             "score": score,
             "summary": str(data.get("summary", "")),
@@ -968,6 +980,14 @@ class LLMService:
             "missing_keywords": [str(item) for item in data.get("missing_keywords", []) if item],
             "keyword_suggestions": [
                 str(item) for item in data.get("keyword_suggestions", []) if item
+            ],
+            "writing_score": writing_score,
+            "writing_summary": str(data.get("writing_summary", "")),
+            "writing_strengths": [
+                str(item) for item in data.get("writing_strengths", []) if item
+            ],
+            "writing_improvements": [
+                str(item) for item in data.get("writing_improvements", []) if item
             ],
         }
 

@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { useI18n } from "@/i18n/context";
 import { fetchLLMProviders, type LLMProviderInfo } from "@/lib/api";
+import type { LLMProviderId } from "@/lib/types";
 
-export type LLMProviderId = "openai" | "groq" | "claude";
+export type { LLMProviderId };
 
 interface LLMSelectorProps {
   provider: LLMProviderId;

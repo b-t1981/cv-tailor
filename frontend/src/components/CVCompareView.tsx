@@ -1,8 +1,7 @@
 "use client";
 
-import { getDownloadUrl } from "@/lib/api";
 import { useI18n } from "@/i18n/context";
-import type { CVParagraph } from "@/lib/api";
+import { getDownloadUrl, type CVParagraph } from "@/lib/api";
 
 interface CVColumnProps {
   title: string;
@@ -26,7 +25,7 @@ function CVColumn({
     : paragraphs;
 
   return (
-    <div className="flex min-h-[220px] flex-col rounded-lg border border-slate-200 bg-white sm:min-h-[320px] lg:min-h-[360px]">
+    <div className="flex min-h-[180px] flex-col rounded-lg border border-slate-200 bg-white sm:min-h-[280px]">
       <div className="border-b border-slate-200 bg-slate-50 px-3 py-2.5 sm:px-4 sm:py-3">
         <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
       </div>
@@ -69,8 +68,6 @@ interface CVCompareViewProps {
   downloadUrlPdf?: string | null;
   modificationsCount?: number;
   summary?: string | null;
-  /** Masque l'UI tout en conservant le composant dans le code. */
-  hidden?: boolean;
 }
 
 export function CVCompareView({
@@ -81,17 +78,14 @@ export function CVCompareView({
   downloadUrlPdf,
   modificationsCount,
   summary,
-  hidden = false,
 }: CVCompareViewProps) {
   const { t } = useI18n();
 
-  const hasResult = Boolean(tailoredParagraphs && tailoredParagraphs.length > 0);
-  const modifiedIds = new Set(
-    tailoredParagraphs?.filter((item) => item.modified).map((item) => item.id) ?? [],
-  );
+  const tailored = tailoredParagraphs ?? [];
+  const modifiedIds = new Set(tailored.filter((item) => item.modified).map((item) => item.id));
   const modifiedCount = modifiedIds.size;
 
-  if (hidden || (!hasResult && originalParagraphs.length === 0 && !filename)) {
+  if (tailored.length === 0) {
     return null;
   }
 
@@ -99,26 +93,15 @@ export function CVCompareView({
     <div className="card">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">
-            {hasResult ? t("compareAfterTitle") : t("comparePreviewTitle")}
-          </h2>
+          <h2 className="text-lg font-semibold text-slate-900">{t("compareAfterTitle")}</h2>
           {filename && <p className="text-sm text-slate-500">{filename}</p>}
-          {!hasResult && originalParagraphs.length > 0 && (
-            <p className="mt-1 text-xs text-slate-400">
-              {originalParagraphs.length} {t("compareLines")}
-            </p>
-          )}
-          {hasResult && summary && (
-            <p className="mt-2 max-w-3xl text-sm text-slate-600">{summary}</p>
-          )}
+          {summary && <p className="mt-2 max-w-3xl text-sm text-slate-600">{summary}</p>}
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
-          {hasResult && (
-            <span className="w-fit rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-800">
-              {modificationsCount ?? modifiedCount} {t("compareChanged")}
-            </span>
-          )}
-          {hasResult && downloadUrl && (
+          <span className="w-fit rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-800">
+            {modificationsCount ?? modifiedCount} {t("compareChanged")}
+          </span>
+          {downloadUrl && (
             <a
               href={getDownloadUrl(downloadUrl)}
               download
@@ -127,7 +110,7 @@ export function CVCompareView({
               {t("download")}
             </a>
           )}
-          {hasResult && downloadUrlPdf && (
+          {downloadUrlPdf && (
             <a
               href={getDownloadUrl(downloadUrlPdf)}
               download
@@ -139,50 +122,41 @@ export function CVCompareView({
         </div>
       </div>
 
-      {hasResult ? (
-        <>
-          <p className="mb-3 text-xs text-slate-500">{t("compareDiffHint")}</p>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <CVColumn
-              title={t("compareBefore")}
-              paragraphs={originalParagraphs}
-              modifiedIds={modifiedIds}
-              showDiffOnly
-              emptyMessage={t("compareNoChanges")}
-            />
-            <CVColumn
-              title={t("compareAfter")}
-              paragraphs={tailoredParagraphs ?? []}
-              highlightModified
-              showDiffOnly
-              emptyMessage={t("compareNoChanges")}
-            />
-          </div>
-          <div className="mt-4 border-t border-slate-100 pt-4">
-            <p className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-500">
-              {t("compareFullView")}
-            </p>
-            <div className="grid gap-4 lg:grid-cols-2">
-              <CVColumn title={t("compareBeforeFull")} paragraphs={originalParagraphs} />
-              <CVColumn
-                title={t("compareAfterFull")}
-                paragraphs={tailoredParagraphs ?? []}
-                highlightModified
-                modifiedIds={modifiedIds}
-              />
-            </div>
-          </div>
-        </>
-      ) : (
-        <>
-          <p className="mb-3 text-xs text-slate-500">{t("comparePreviewHint")}</p>
+      <p className="mb-3 text-xs text-slate-500">{t("compareDiffHint")}</p>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <CVColumn
+          title={t("compareBefore")}
+          paragraphs={originalParagraphs}
+          modifiedIds={modifiedIds}
+          showDiffOnly
+          emptyMessage={t("compareNoChanges")}
+        />
+        <CVColumn
+          title={t("compareAfter")}
+          paragraphs={tailored}
+          highlightModified
+          showDiffOnly
+          emptyMessage={t("compareNoChanges")}
+        />
+      </div>
+
+      <details className="mt-4 border-t border-slate-100 pt-4 group">
+        <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-wide text-slate-500 marker:content-none [&::-webkit-details-marker]:hidden">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="text-brand-600 transition group-open:rotate-90">›</span>
+            {t("compareFullView")}
+          </span>
+        </summary>
+        <div className="mt-3 grid gap-4 lg:grid-cols-2">
+          <CVColumn title={t("compareBeforeFull")} paragraphs={originalParagraphs} />
           <CVColumn
-            title={t("compareOriginal")}
-            paragraphs={originalParagraphs}
-            emptyMessage={t("compareEmptyCv")}
+            title={t("compareAfterFull")}
+            paragraphs={tailored}
+            highlightModified
+            modifiedIds={modifiedIds}
           />
-        </>
-      )}
+        </div>
+      </details>
     </div>
   );
 }
