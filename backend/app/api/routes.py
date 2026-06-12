@@ -38,6 +38,8 @@ from app.services.cv_tailor import cv_tailor_service
 from app.services.llm_service import llm_service
 from app.services.match_service import match_service
 from app.services.prompt_service import prompt_service
+from app.services.pdf_exporter import libreoffice_available
+from app.services.session_workspace import clear_session_workspace
 from app.api.http_errors import raise_as_http
 from app.session import get_session_id
 
@@ -107,12 +109,21 @@ async def health() -> HealthResponse:
         providers=providers_info.providers,
         cerebras_fallback_enabled=settings.is_cerebras_fallback_available(),
         groq_in_cooldown=llm_service.is_groq_in_cooldown(),
+        libreoffice_available=libreoffice_available(),
+        pdf_prefer_libreoffice=settings.pdf_prefer_libreoffice,
     )
 
 
 @router.get("/llm/providers", response_model=LLMProvidersResponse)
 async def get_llm_providers() -> LLMProvidersResponse:
     return llm_service.list_providers()
+
+
+@router.post("/session/reset", status_code=204)
+async def reset_workspace_session(request: Request) -> None:
+    """Clear stored CV and exports for the current browser session (e.g. after page refresh)."""
+    session_id = get_session_id(request)
+    clear_session_workspace(session_id)
 
 
 @router.get("/prompts", response_model=PromptConfig)

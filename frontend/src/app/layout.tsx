@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { LocaleHtml } from "@/components/LocaleHtml";
+import { WorkspaceReset } from "@/components/WorkspaceReset";
 import { I18nProvider } from "@/i18n/context";
 import "./globals.css";
 
@@ -19,6 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="fr">
       <body className="safe-bottom antialiased">
         <I18nProvider>
+          <WorkspaceReset />
           <LocaleHtml />
           {children}
         </I18nProvider>

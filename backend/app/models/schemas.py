@@ -208,3 +208,5 @@ class HealthResponse(BaseModel):
     providers: list[LLMProviderInfo]
     cerebras_fallback_enabled: bool = False
     groq_in_cooldown: bool = False
+    libreoffice_available: bool = False
+    pdf_prefer_libreoffice: bool = False

@@ -217,6 +217,13 @@ export async function checkBackendHealth(): Promise<boolean> {
   }
 }
 
+export async function resetWorkspaceSession(): Promise<void> {
+  const response = await apiFetch(apiUrl("session/reset"), { method: "POST" }, 15_000);
+  if (!response.ok && response.status !== 204) {
+    throw new Error("Session reset failed");
+  }
+}
+
 export async function fetchPrompts(): Promise<PromptConfig> {
   const response = await apiFetch(apiUrl("prompts"));
   if (!response.ok) {

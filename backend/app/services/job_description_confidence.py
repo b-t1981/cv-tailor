@@ -123,37 +123,38 @@ def _fallback_reason(
 
     if profile_confidence == "high":
         return (
-            "L'offre contient assez d'exigences concrètes sur le poste pour une analyse fiable."
+            "L'offre est assez précise : le score profil ci-dessous est fiable."
             if fr
-            else "The posting has enough concrete role requirements for a reliable analysis."
+            else "The posting is specific enough: the profile score below is reliable."
         )
 
     if profile_confidence == "low":
         if length < 120:
             return (
-                "Description très courte : peu d'exigences exploitables pour évaluer l'adéquation profil."
+                "Offre très courte : le score profil est peu fiable. Collez la section missions et compétences requises."
                 if fr
-                else "Very short description: too few requirements to assess profile fit reliably."
+                else "Very short posting: profile score is unreliable. Paste missions and required skills."
             )
         return (
-            f"Environ {100 - role_content_ratio} % du texte concerne l'entreprise ou le contexte "
-            "plutôt que le poste. Collez la section missions / profil recherché pour améliorer l'analyse."
+            f"Beaucoup de texte hors poste (~{100 - role_content_ratio} % : entreprise, contexte…). "
+            "Le score profil reste indicatif — privilégiez la section missions / profil recherché."
             if fr
-            else f"About {100 - role_content_ratio}% of the text is company or context, not the role. "
-            "Paste the missions / requirements section for a sharper analysis."
+            else f"Much of the text is not about the role (~{100 - role_content_ratio}% company/context). "
+            "Profile score is indicative — paste missions / requirements only."
         )
 
     if length < 280:
         return (
-            "Description partielle : les scores profil sont indicatifs. Complétez si possible la partie missions."
+            "Offre incomplète : le score profil est indicatif. Ajoutez missions et compétences si possible."
             if fr
-            else "Partial description: profile scores are indicative. Add missions/requirements if you can."
+            else "Incomplete posting: profile score is indicative. Add missions and skills if you can."
         )
     return (
-        f"Une partie importante de l'offre ({100 - role_content_ratio} % hors cœur du poste) "
-        "peut biaiser mots-clés et écarts."
+        f"Une partie du texte collé n'est pas sur le poste (~{100 - role_content_ratio} %). "
+        "Le score profil peut être biaisé (mots-clés, écarts)."
         if fr
-        else f"A large share of the posting ({100 - role_content_ratio}% non-role content) may skew keywords and gaps."
+        else f"Part of the pasted text is not about the role (~{100 - role_content_ratio}%). "
+        "Profile score may be skewed (keywords, gaps)."
     )
 
 

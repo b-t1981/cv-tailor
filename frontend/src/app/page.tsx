@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { BackendConnectionBanner } from "@/components/BackendConnectionBanner";
-import { ApplicationHistoryPanel } from "@/components/ApplicationHistoryPanel";
 import { CVCompareView } from "@/components/CVCompareView";
 import { FileUpload } from "@/components/FileUpload";
 import { JobAnalysisPanel } from "@/components/JobAnalysisPanel";
@@ -29,7 +28,7 @@ import {
   type TailorResult,
 } from "@/lib/api";
 import { JOB_STORAGE_KEY } from "@/lib/constants";
-import { saveAdaptedCv, saveHistoryEntry, savePreviewCv, updateHistoryEntry } from "@/lib/history";
+import { saveAdaptedCv, savePreviewCv } from "@/lib/history";
 import type { LLMProviderId } from "@/lib/types";
 
 export default function HomePage() {
@@ -79,11 +78,6 @@ export default function HomePage() {
     const timer = window.setTimeout(() => setPreviewSlowHint(true), 8_000);
     return () => window.clearTimeout(timer);
   }, [previewLoading]);
-
-  useEffect(() => {
-    const saved = sessionStorage.getItem(JOB_STORAGE_KEY);
-    if (saved) setJobDescription(saved);
-  }, []);
 
   useEffect(() => {
     if (jobDescription.trim()) sessionStorage.setItem(JOB_STORAGE_KEY, jobDescription);
@@ -231,16 +225,6 @@ export default function HomePage() {
 
       const fname = previewFilename || file?.name || "cv.docx";
       saveAdaptedCv(displayTailoredParagraphs, fname);
-      saveHistoryEntry({
-        id: result.job_id,
-        date: new Date().toISOString(),
-        jobTitleSnippet: jobDescription.slice(0, 60) + (jobDescription.length > 60 ? "…" : ""),
-        scoreBefore,
-        scoreAfter: null,
-        modificationsCount: Object.keys(acceptedModifications).length,
-        downloadUrl: urls.downloadUrl,
-        tailoredParagraphs: displayTailoredParagraphs,
-      });
 
       try {
         const after = await analyzeJob({
@@ -252,7 +236,6 @@ export default function HomePage() {
         });
         setScoreAfter(after.score);
         setAnalysis(after);
-        updateHistoryEntry(result.job_id, { scoreAfter: after.score });
       } catch {
         /* optional */
       }
@@ -549,7 +532,6 @@ export default function HomePage() {
           )}
         </div>
 
-        <ApplicationHistoryPanel />
       </main>
     </div>
   );

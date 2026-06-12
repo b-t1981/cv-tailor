@@ -1,45 +1,12 @@
 import type { CVParagraph } from "./api";
 
-export interface ApplicationHistoryEntry {
-  id: string;
-  date: string;
-  jobTitleSnippet: string;
-  scoreBefore: number | null;
-  scoreAfter: number | null;
-  modificationsCount: number;
-  downloadUrl?: string;
-  tailoredParagraphs?: CVParagraph[];
-}
-
-const HISTORY_KEY = "cv-tailor-history";
 const ADAPTED_CV_KEY = "cv-tailor-adapted-cv";
 const PREVIEW_CV_KEY = "cv-tailor-preview-cv";
-const MAX_ENTRIES = 20;
 
 export interface CvForApplication {
   paragraphs: CVParagraph[];
   filename: string;
   adapted: boolean;
-}
-
-export function loadHistory(): ApplicationHistoryEntry[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    return raw ? (JSON.parse(raw) as ApplicationHistoryEntry[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function saveHistoryEntry(entry: ApplicationHistoryEntry): void {
-  const items = [entry, ...loadHistory()].slice(0, MAX_ENTRIES);
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(items));
-}
-
-export function updateHistoryEntry(id: string, patch: Partial<ApplicationHistoryEntry>): void {
-  const items = loadHistory().map((item) => (item.id === id ? { ...item, ...patch } : item));
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(items));
 }
 
 export function saveAdaptedCv(paragraphs: CVParagraph[], filename: string): void {

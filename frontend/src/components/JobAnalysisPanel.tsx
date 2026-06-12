@@ -34,24 +34,37 @@ function confidenceBadgeClass(level: ConfidenceLevel): string {
   return "bg-amber-100 text-amber-900";
 }
 
-function confidenceLabel(level: ConfidenceLevel, t: (key: TranslationKey) => string): string {
-  if (level === "high") return t("confidenceHigh");
-  if (level === "low") return t("confidenceLow");
-  return t("confidenceModerate");
+type ConfidenceScope = "profile" | "cv";
+
+function confidenceLabel(
+  level: ConfidenceLevel,
+  scope: ConfidenceScope,
+  t: (key: TranslationKey) => string,
+): string {
+  if (scope === "profile") {
+    if (level === "high") return t("confidenceProfileHigh");
+    if (level === "low") return t("confidenceProfileLow");
+    return t("confidenceProfileModerate");
+  }
+  if (level === "high") return t("confidenceCvHigh");
+  if (level === "low") return t("confidenceCvLow");
+  return t("confidenceCvModerate");
 }
 
 function ConfidenceBadge({
   level,
+  scope,
   t,
 }: {
   level: ConfidenceLevel;
+  scope: ConfidenceScope;
   t: (key: TranslationKey) => string;
 }) {
   return (
     <span
       className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${confidenceBadgeClass(level)}`}
     >
-      {confidenceLabel(level, t)}
+      {confidenceLabel(level, scope, t)}
     </span>
   );
 }
@@ -60,13 +73,17 @@ function ScoreHeader({
   score,
   title,
   subtitle,
+  scoreMeaning,
   confidence,
+  confidenceScope,
   confidenceT,
 }: {
   score: number;
   title: string;
   subtitle: string;
+  scoreMeaning?: string;
   confidence?: ConfidenceLevel;
+  confidenceScope?: ConfidenceScope;
   confidenceT?: (key: TranslationKey) => string;
 }) {
   return (
@@ -80,9 +97,12 @@ function ScoreHeader({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-slate-900">{title}</p>
-            {confidence && confidenceT && <ConfidenceBadge level={confidence} t={confidenceT} />}
+            {confidence && confidenceScope && confidenceT && (
+              <ConfidenceBadge level={confidence} scope={confidenceScope} t={confidenceT} />
+            )}
           </div>
           <p className="text-xs text-slate-500">{subtitle}</p>
+          {scoreMeaning && <p className="mt-0.5 text-[11px] text-slate-400">{scoreMeaning}</p>}
         </div>
       </div>
       <div className="w-full min-w-0 flex-1 sm:min-w-[160px]">
@@ -163,7 +183,12 @@ export function JobAnalysisPanel({
 
       {analysis && !loading && (
         <div className="space-y-4">
-          {(analysis.confidence_reason || analysis.profile_confidence === "low") && (
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
+            {t("analysisLegend")}
+          </p>
+
+          {(analysis.confidence_reason ||
+            (analysis.profile_confidence ?? "moderate") !== "high") && (
             <div
               className={`rounded-lg border px-4 py-3 text-sm ${
                 (analysis.profile_confidence ?? "moderate") === "low"
@@ -171,12 +196,18 @@ export function JobAnalysisPanel({
                   : "border-slate-200 bg-slate-50 text-slate-700"
               }`}
             >
-              {analysis.confidence_reason && <p>{analysis.confidence_reason}</p>}
+              <p className="font-medium text-slate-900">{t("confidenceBannerTitle")}</p>
+              {analysis.confidence_reason && <p className="mt-1.5">{analysis.confidence_reason}</p>}
               {(analysis.role_content_ratio ?? 0) > 0 &&
                 (analysis.profile_confidence ?? "moderate") !== "high" && (
-                <p className="mt-1.5 text-xs opacity-80">
-                  {t("confidenceRoleShare")} : ~{analysis.role_content_ratio}%
-                </p>
+                <div className="mt-2 rounded-md border border-slate-200/80 bg-white/60 px-2.5 py-2 text-xs">
+                  <p>
+                    <span className="font-medium">{t("confidenceRoleShareLabel")}</span>
+                    {" : ~"}
+                    {analysis.role_content_ratio}%
+                  </p>
+                  <p className="mt-1 text-slate-500">{t("confidenceRoleShareNote")}</p>
+                </div>
               )}
             </div>
           )}
@@ -186,11 +217,13 @@ export function JobAnalysisPanel({
               score={analysis.score}
               title={t("matchTitle")}
               subtitle={t("matchSubtitle")}
+              scoreMeaning={t("matchScoreMeaning")}
               confidence={analysis.profile_confidence ?? "moderate"}
+              confidenceScope="profile"
               confidenceT={t}
             />
 
-            {(scoreBefore != null || scoreAfter != null) && (
+            {scoreAfter != null && scoreBefore != null && (
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 {scoreBefore != null && (
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
@@ -302,7 +335,9 @@ export function JobAnalysisPanel({
                 score={analysis.writing_score}
                 title={t("writingTitle")}
                 subtitle={t("writingSubtitle")}
+                scoreMeaning={t("writingScoreMeaning")}
                 confidence={analysis.cv_confidence ?? "moderate"}
+                confidenceScope="cv"
                 confidenceT={t}
               />
 
