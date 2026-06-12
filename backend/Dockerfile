@@ -6,6 +6,7 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libreoffice-writer \
+        fontconfig \
         fonts-dejavu-core \
         fonts-liberation \
     && rm -rf /var/lib/apt/lists/*

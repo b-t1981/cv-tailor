@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     # docx2pdf ouvre Microsoft Word (dialogue imprimante sur Windows) — désactivé par défaut
     pdf_use_word: bool = False
+    # Sur Render (Docker + LibreOffice) : true = PDF via soffice en priorité (meilleure fidélité)
+    pdf_prefer_libreoffice: bool = False
     max_upload_bytes: int = 10 * 1024 * 1024
     output_ttl_hours: int = 48
     rate_limit_per_minute: int = 60
